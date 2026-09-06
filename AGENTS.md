@@ -21,27 +21,14 @@ ansirover-restore-upload.md       sidecar documentation
 
 `caprover_ansirover_policy.py` is a shared module imported by the implementations. It is not a CLI and has no shim.
 
-The `~/bin` consumer exposes command names as symlinks pointing at these shims, so shims must resolve their own real location instead of assuming `$HOME/bin`:
+The `~/bin` consumer exposes command names as symlinks pointing at these shims. Shims follow the consumer's two-line base-shim convention and exec the same-basename implementation file at the consumer's submodule checkout path:
 
 ```bash
-#!/usr/bin/env bash
-set -euo pipefail
-
-SOURCE="${BASH_SOURCE[0]}"
-while [ -L "$SOURCE" ]; do
-    SOURCE_DIRECTORY="$(CDPATH= cd -P -- "$(dirname -- "$SOURCE")" && pwd)"
-    SOURCE="$(readlink "$SOURCE")"
-    case "$SOURCE" in
-        /*) ;;
-        *) SOURCE="$SOURCE_DIRECTORY/$SOURCE" ;;
-    esac
-done
-
-SCRIPT_DIR="$(CDPATH= cd -P -- "$(dirname -- "$SOURCE")" && pwd)"
-exec "$SCRIPT_DIR/ansirover-restore-upload.py" "$@"
+# shellcheck shell=bash
+exec "$HOME/bin/.packages/ansirover/ansirover-restore-upload.py" "$@"
 ```
 
-Keep the shim free of argument parsing and business logic. Command-name and implementation choices stay reversible by editing only the shim target.
+The static path is intentional: it keeps the shim free of argument parsing, path resolution, and business logic, and executing the implementation through its real package path keeps `sys.path[0]` inside this repository so sibling imports such as `caprover_ansirover_policy` resolve.
 
 The deprecated `caprover-ansirover-*` wrappers live in the consumer repository, not here.
 
