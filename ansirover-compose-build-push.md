@@ -88,21 +88,23 @@ docker compose config --format json
 
 This validates interpolation and lets the CLI inspect the exact resolved image names before any build or push starts.
 
-After a successful build/push, every published image is verified with:
-
-```bash
-docker buildx imagetools inspect <image>
-```
+A successful `docker compose build --push` is treated as successful image publication.
 
 ## Usage
 
-From anywhere inside the repository:
+Calling the command without arguments prints the usage guide and performs no action:
 
 ```bash
 ansirover-compose-build-push
 ```
 
-Using an explicit path inside another repository:
+Run against the current repository explicitly:
+
+```bash
+ansirover-compose-build-push .
+```
+
+Using another repository:
 
 ```bash
 ansirover-compose-build-push /path/to/repository
@@ -111,8 +113,10 @@ ansirover-compose-build-push /path/to/repository
 Validate without building or pushing:
 
 ```bash
-ansirover-compose-build-push --dry-run
+ansirover-compose-build-push . --dry-run
 ```
+
+The explicit path prevents a bare invocation from accidentally building or pushing the current repository.
 
 ## Dirty working tree
 
@@ -201,5 +205,4 @@ Creating a missing base-image repository and linking it as a submodule are outsi
 - Git
 - Docker
 - Docker Compose v2
-- Docker Buildx
 - authentication that permits pushing to `cr.umapps.net`

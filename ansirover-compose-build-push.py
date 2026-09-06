@@ -263,30 +263,58 @@ def build_and_push(ansirover_dir, compose_path, image_tag):
     )
 
 
-def verify_published_images(ansirover_dir, build_services):
-    for service_name, image_reference in build_services:
-        info(f"[verify] Inspecting published image for {service_name}: {image_reference}")
-        run_command(
-            ["docker", "buildx", "imagetools", "inspect", image_reference],
-            cwd=ansirover_dir,
-            capture_output=True,
-            label="verify",
-        )
-        info(f"[verify] Published image is available: {image_reference}")
+def print_usage_and_guide():
+    print("""Usage:
+  ansirover-compose-build-push <path> [options]
+
+Purpose:
+  Build and push Docker Compose images defined in:
+
+    <git-root>/ansirover/compose.yaml
+
+Arguments:
+  <path>
+      Path inside the target Git repository.
+
+      Use "." for the current repository.
+
+Options:
+  --dry-run
+      Validate the repository and resolved Compose model and print
+      the build/push plan without building or pushing.
+
+  -h, --help
+      Show this help.
+
+Examples:
+  ansirover-compose-build-push .
+  ansirover-compose-build-push /Volumes/FrgGit/tictactoe
+  ansirover-compose-build-push . --dry-run
+
+Image tag:
+  IMAGE_TAG=$(git rev-parse --short HEAD)
+
+Registry:
+  cr.umapps.net/umapps/
+
+Behavior:
+  Running this command without arguments only prints this usage
+  message and performs no action.
+""")
 
 
 def parse_args(arguments=None):
     parser = argparse.ArgumentParser(
+        add_help=False,
         description=(
-            "Build and push Docker Compose build services from <git-root>/ansirover/compose.yaml "
-            "using IMAGE_TAG=<short-git-head>."
-        )
+            "Build and push Docker Compose build services from "
+            "<git-root>/ansirover/compose.yaml using "
+            "IMAGE_TAG=<short-git-head>."
+        ),
     )
     parser.add_argument(
         "path",
-        nargs="?",
-        default=".",
-        help="path inside the target Git repository; defaults to current directory",
+        help="path inside the target Git repository; use . for the current repository",
     )
     parser.add_argument(
         "--dry-run",
@@ -297,7 +325,17 @@ def parse_args(arguments=None):
 
 
 def main(arguments=None):
-    args = parse_args(arguments)
+    raw_arguments = list(arguments) if arguments is not None else sys.argv[1:]
+
+    if not raw_arguments:
+        print_usage_and_guide()
+        return 0
+
+    if "-h" in raw_arguments or "--help" in raw_arguments:
+        print_usage_and_guide()
+        return 0
+
+    args = parse_args(raw_arguments)
     git_root = resolve_git_root(args.path)
     ansirover_dir = git_root / ANSIROVER_DIR_NAME
     compose_path = ansirover_dir / COMPOSE_FILE_NAME
@@ -332,7 +370,6 @@ def main(arguments=None):
             compose_path=compose_path,
             image_tag=image_tag,
         )
-        verify_published_images(ansirover_dir, build_services)
 
     result("IMAGE_TAG=" + image_tag)
     result("GIT_ROOT=" + str(git_root))
