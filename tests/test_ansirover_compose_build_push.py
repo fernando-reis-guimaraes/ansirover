@@ -1,192 +1,164 @@
 import contextlib
 import importlib.util
 import io
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
-
-REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-MODULE_PATH = REPOSITORY_ROOT / "ansirover-compose-build-push.py"
-SPEC = importlib.util.spec_from_file_location("ansirover_compose_build_push", MODULE_PATH)
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPT = ROOT / "ansirover-compose-build-push.py"
+SPEC = importlib.util.spec_from_file_location("ansirover_compose_build_push", SCRIPT)
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 
-class AnsiRoverComposeBuildPushTests(unittest.TestCase):
-    def test_no_arguments_prints_usage_without_running_commands(self):
-        stdout = io.StringIO()
+def git(path, *arguments):
+    return subprocess.run(
+        ["git", "-C", str(path), *arguments],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    ).stdout
 
-        with mock.patch.object(MODULE, "run_command") as run_command:
+
+def init_repo(path):
+    subprocess.run(["git", "init", "-q", str(path)], check=True)
+    git(path, "config", "user.name", "AnsiRover Test")
+    git(path, "config", "user.email", "ansirover-test@example.invalid")
+
+
+class BuildPushTests(unittest.TestCase):
+    def test_no_arguments_only_prints_usage(self):
+        stdout = io.StringIO()
+        with mock.patch.object(MODULE, "run") as run_command:
             with contextlib.redirect_stdout(stdout):
                 exit_code = MODULE.main([])
-
         self.assertEqual(exit_code, 0)
         self.assertIn("Usage:", stdout.getvalue())
         run_command.assert_not_called()
 
-    def test_compose_must_define_exactly_one_service(self):
-        compose_model = {
-            "services": {
-                "frontend": {"build": {"context": ".."}},
-                "backend": {"build": {"context": ".."}},
-            }
-        }
-
+    def test_one_compose_means_one_service(self):
         with self.assertRaises(SystemExit):
-            MODULE.get_single_build_service(compose_model)
+            MODULE.single_service({"services": {"a": {"build": "."}, "b": {"build": "."}}})
 
-    def test_ansirover_directory_must_be_flat(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            ansirover_dir = Path(temporary_directory)
-            (ansirover_dir / "nested-app").mkdir()
-
+    def test_ansirover_must_be_flat(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ansirover = Path(directory)
+            (ansirover / "nested").mkdir()
             with self.assertRaises(SystemExit):
-                MODULE.ensure_ansirover_is_flat(ansirover_dir)
+                MODULE.require_flat_ansirover(ansirover)
 
-    def test_build_context_resolves_relative_to_ansirover_directory(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            application_root = Path(temporary_directory)
-            ansirover_dir = application_root / "ansirover"
-            source_dir = application_root / "source"
-            ansirover_dir.mkdir()
-            source_dir.mkdir()
-
-            service_definition = {
-                "build": {
-                    "context": "../source",
-                }
-            }
-
-            build_context = MODULE.resolve_build_context(
-                ansirover_dir,
-                "example",
-                service_definition,
+    def test_dockerignore_is_required_and_must_follow_negations(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = Path(directory)
+            ansirover = app / "ansirover"
+            ansirover.mkdir()
+            definition = {"build": {"context": ".."}}
+            with self.assertRaises(SystemExit):
+                MODULE.validate_dockerignore(app, ansirover, "app", definition)
+            ignore = app / ".dockerignore"
+            ignore.write_text("ansirover/\n!**/*.md\n", encoding="utf-8")
+            with self.assertRaises(SystemExit):
+                MODULE.validate_dockerignore(app, ansirover, "app", definition)
+            ignore.write_text("!**/*.md\nansirover/\n", encoding="utf-8")
+            self.assertEqual(
+                MODULE.validate_dockerignore(app, ansirover, "app", definition),
+                ignore,
             )
 
-            self.assertEqual(build_context, source_dir.resolve())
+    def test_dockerfile_specific_ignore_takes_precedence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = Path(directory)
+            ansirover = app / "ansirover"
+            docker_dir = app / "docker"
+            ansirover.mkdir()
+            docker_dir.mkdir()
+            (app / ".dockerignore").write_text("ansirover/\n", encoding="utf-8")
+            dockerfile = docker_dir / "build.Dockerfile"
+            dockerfile.write_text("FROM scratch\n", encoding="utf-8")
+            specific = docker_dir / "build.Dockerfile.dockerignore"
+            specific.write_text("node_modules/\n", encoding="utf-8")
+            definition = {"build": {"context": "..", "dockerfile": "docker/build.Dockerfile"}}
+            with self.assertRaises(SystemExit):
+                MODULE.validate_dockerignore(app, ansirover, "app", definition)
+            specific.write_text("ansirover/\n", encoding="utf-8")
+            self.assertEqual(MODULE.validate_dockerignore(app, ansirover, "app", definition), specific)
 
-    def test_image_tag_is_taken_from_git_repo_owning_build_context(self):
-        application_root = Path("/tmp/application")
-        application_git_root = application_root
-        ansirover_dir = application_root / "ansirover"
-        compose_path = ansirover_dir / "compose.yaml"
-        build_context = application_root / "source-submodule"
-        source_git_root = build_context
+    def test_source_clean_check_ignores_ansirover_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = Path(directory) / "app"
+            ansirover = app / "ansirover"
+            ansirover.mkdir(parents=True)
+            (app / "app.txt").write_text("clean\n", encoding="utf-8")
+            (ansirover / "compose.yaml").write_text("clean\n", encoding="utf-8")
+            init_repo(app)
+            git(app, "add", ".")
+            git(app, "commit", "-qm", "initial")
+            (ansirover / "compose.yaml").write_text("dirty\n", encoding="utf-8")
+            MODULE.require_clean_source(app, ansirover)
+            (app / "app.txt").write_text("dirty\n", encoding="utf-8")
+            with self.assertRaises(SystemExit):
+                MODULE.require_clean_source(app, ansirover)
 
-        discovery_model = {
-            "services": {
-                "example": {
-                    "build": {"context": str(build_context)},
-                    "image": (
-                        "cr.umapps.net/umapps/example:"
-                        + MODULE.DISCOVERY_IMAGE_TAG
-                    ),
-                }
-            }
-        }
-        resolved_model = {
-            "services": {
-                "example": {
-                    "build": {"context": str(build_context)},
-                    "image": "cr.umapps.net/umapps/example:abc1234",
-                }
-            }
-        }
+    def test_inventory_update(self):
+        with tempfile.TemporaryDirectory() as directory:
+            inventory = Path(directory) / "app.yaml"
+            inventory.write_text("appName: app\ndeployedImageName: old:image\n", encoding="utf-8")
+            updated = MODULE.inventory_with_image(inventory, "cr.umapps.net/umapps/app:abc1234")
+            self.assertIn("deployedImageName: cr.umapps.net/umapps/app:abc1234", updated)
 
-        with mock.patch.object(
-            MODULE,
-            "resolve_application_layout",
-            return_value=(
-                application_root,
-                application_git_root,
-                ansirover_dir,
-                compose_path,
-            ),
-        ):
-            with mock.patch.object(MODULE, "ensure_ansirover_is_flat"):
-                with mock.patch.object(
-                    MODULE,
-                    "load_compose_model",
-                    side_effect=[discovery_model, resolved_model],
-                ):
-                    with mock.patch.object(
-                        MODULE,
-                        "resolve_build_context",
-                        side_effect=[build_context, build_context],
-                    ):
-                        with mock.patch.object(
-                            MODULE,
-                            "resolve_git_root",
-                            return_value=source_git_root,
-                        ) as resolve_git_root:
-                            with mock.patch.object(
-                                MODULE,
-                                "get_image_tag",
-                                return_value="abc1234",
-                            ) as get_image_tag:
-                                with mock.patch.object(
-                                    MODULE,
-                                    "warn_if_git_worktree_is_dirty",
-                                ):
-                                    with mock.patch.object(MODULE, "print_plan"):
-                                        stdout = io.StringIO()
+    def test_allowlist_leaves_unknown_file_out(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ansirover = Path(directory) / "ansirover"
+            ansirover.mkdir()
+            compose = ansirover / "compose.yaml"
+            inventory = ansirover / "app.yaml"
+            sidecar = ansirover / "app.env-vars.env"
+            dockerfile = ansirover / "Build.Dockerfile"
+            specific_ignore = ansirover / "Build.Dockerfile.dockerignore"
+            unknown = ansirover / "notes.tmp"
+            for path in [compose, inventory, sidecar, dockerfile, specific_ignore, unknown]:
+                path.write_text("x\n", encoding="utf-8")
+            paths = MODULE.allowlisted_paths(ansirover, "app", dockerfile, specific_ignore)
+            self.assertIn(compose, paths)
+            self.assertIn(inventory, paths)
+            self.assertIn(sidecar, paths)
+            self.assertIn(dockerfile, paths)
+            self.assertIn(specific_ignore, paths)
+            self.assertNotIn(unknown, paths)
 
-                                        with contextlib.redirect_stdout(stdout):
-                                            exit_code = MODULE.main(
-                                                ["/tmp/application", "--dry-run"]
-                                            )
+    def test_commit_paths_excludes_even_staged_unknown_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory) / "repo"
+            repo.mkdir()
+            init_repo(repo)
+            allowed = repo / "compose.yaml"
+            unknown = repo / "notes.tmp"
+            allowed.write_text("one\n", encoding="utf-8")
+            unknown.write_text("one\n", encoding="utf-8")
+            git(repo, "add", ".")
+            git(repo, "commit", "-qm", "initial")
+            allowed.write_text("two\n", encoding="utf-8")
+            unknown.write_text("two\n", encoding="utf-8")
+            git(repo, "add", "notes.tmp")
+            self.assertTrue(MODULE.commit_paths(repo, [allowed], "test"))
+            changed = git(repo, "show", "--name-only", "--pretty=format:", "HEAD").splitlines()
+            self.assertEqual(changed, ["compose.yaml"])
+            self.assertIn("notes.tmp", git(repo, "status", "--porcelain"))
 
-        self.assertEqual(exit_code, 0)
-        resolve_git_root.assert_called_once_with(
-            build_context,
-            "build.context source",
-        )
-        get_image_tag.assert_called_once_with(source_git_root)
-        self.assertIn("IMAGE_TAG=abc1234", stdout.getvalue())
-        self.assertIn(
-            "SOURCE_GIT_ROOT=/tmp/application/source-submodule",
-            stdout.getvalue(),
-        )
-
-    def test_application_layout_accepts_ansirover_submodule_path(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            application_root = Path(temporary_directory) / "application"
-            ansirover_dir = application_root / "ansirover"
-            ansirover_dir.mkdir(parents=True)
-            compose_path = ansirover_dir / "compose.yaml"
-            compose_path.write_text("services: {}\n", encoding="utf-8")
-
-            with mock.patch.object(
-                MODULE,
-                "resolve_git_root",
-                return_value=application_root.resolve(),
-            ) as resolve_git_root:
-                layout = MODULE.resolve_application_layout(ansirover_dir)
-
-            self.assertEqual(layout[0], application_root.resolve())
-            self.assertEqual(layout[1], application_root.resolve())
-            self.assertEqual(layout[2], ansirover_dir.resolve())
-            self.assertEqual(layout[3], compose_path.resolve())
-            resolve_git_root.assert_called_once_with(
-                application_root.resolve(),
-                "application",
-            )
+    def test_git_environment_is_noninteractive(self):
+        environment = MODULE.noninteractive_git_environment()
+        self.assertEqual(environment["GIT_TERMINAL_PROMPT"], "0")
+        self.assertEqual(environment["GCM_INTERACTIVE"], "Never")
+        self.assertIn("BatchMode=yes", environment["GIT_SSH_COMMAND"])
 
     def test_remote_build_context_is_rejected(self):
-        service_definition = {
-            "build": {
-                "context": "https://github.com/example/example.git",
-            }
-        }
-
+        definition = {"build": {"context": "https://github.com/example/example.git"}}
         with self.assertRaises(SystemExit):
-            MODULE.resolve_build_context(
-                Path("/tmp/ansirover"),
-                "example",
-                service_definition,
-            )
+            MODULE.build_context(Path("/tmp/ansirover"), "app", definition)
 
 
 if __name__ == "__main__":
