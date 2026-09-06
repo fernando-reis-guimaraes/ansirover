@@ -3,20 +3,27 @@
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
 
-
 ANSIROVER_DIR_NAME = "ansirover"
 COMPOSE_FILE_NAME = "compose.yaml"
 REGISTRY_PREFIX = "cr.umapps.net/umapps/"
 DISCOVERY_IMAGE_TAG = "ansirover-discovery"
+SIDECAR_SUFFIXES = (
+    ".env-vars.env",
+    ".custom-nginx-config.conf",
+    ".pre-deploy-function.js",
+    ".service-update-override.yaml",
+)
 
 
-def log_timestamp():
-    return datetime.now().astimezone().isoformat(timespec="seconds")
+def info(message):
+    timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+    print(f"[{timestamp}] {message}", file=sys.stderr, flush=True)
 
 
 def fail(message):
@@ -24,43 +31,19 @@ def fail(message):
     raise SystemExit(1)
 
 
-def info(message):
-    print(f"[{log_timestamp()}] {message}", file=sys.stderr, flush=True)
-
-
-def result(message):
-    print(message, flush=True)
-
-
-def print_process_output(completed_process):
-    if completed_process.stdout:
-        print(completed_process.stdout, file=sys.stderr, end="")
-
-    if completed_process.stderr:
-        print(completed_process.stderr, file=sys.stderr, end="")
-
-
-def run_command(command, cwd, env=None, capture_output=False, label=None):
-    display_label = "run"
-
-    if label:
-        display_label = label
-
-    info(f"[{display_label}] cwd: {cwd}")
-    info(f"[{display_label}] " + " ".join(command))
-
+def run(command, cwd, environment=None, capture=False, label="run"):
+    info(f"[{label}] cwd: {cwd}")
+    info(f"[{label}] " + " ".join(command))
     stdout_target = None
     stderr_target = None
-
-    if capture_output:
+    if capture:
         stdout_target = subprocess.PIPE
         stderr_target = subprocess.PIPE
-
     try:
-        completed_process = subprocess.run(
+        completed = subprocess.run(
             command,
             cwd=str(cwd),
-            env=env,
+            env=environment,
             text=True,
             stdout=stdout_target,
             stderr=stderr_target,
@@ -68,585 +51,418 @@ def run_command(command, cwd, env=None, capture_output=False, label=None):
         )
     except FileNotFoundError:
         fail(f"command not found: {command[0]}")
-
-    if capture_output and completed_process.stderr:
-        print(completed_process.stderr, file=sys.stderr, end="")
-
-    if completed_process.returncode != 0:
-        if capture_output:
-            print_process_output(completed_process)
-
-        fail(
-            f"command failed with exit status {completed_process.returncode}: "
-            + " ".join(command)
-        )
-
-    return completed_process
+    if completed.returncode != 0:
+        if capture and completed.stdout:
+            print(completed.stdout, file=sys.stderr, end="")
+        if capture and completed.stderr:
+            print(completed.stderr, file=sys.stderr, end="")
+        fail(f"command failed with exit status {completed.returncode}: {' '.join(command)}")
+    if capture and completed.stderr:
+        print(completed.stderr, file=sys.stderr, end="")
+    return completed
 
 
-def resolve_existing_directory(path):
-    candidate = Path(path).expanduser().resolve()
+def git_text(repository, *arguments):
+    completed = run(
+        ["git", "-C", str(repository), *arguments],
+        cwd=repository,
+        capture=True,
+        label="git",
+    )
+    return completed.stdout.strip()
 
-    if not candidate.exists():
-        fail(f"path does not exist: {candidate}")
 
+def git_root(path, purpose):
+    value = git_text(path, "rev-parse", "--show-toplevel")
+    if not value:
+        fail(f"could not determine {purpose} Git root from: {path}")
+    return Path(value).resolve()
+
+
+def relative_path(parent, child):
+    try:
+        return child.relative_to(parent)
+    except ValueError:
+        return None
+
+
+def resolve_layout(input_path):
+    candidate = Path(input_path).expanduser().resolve()
     if not candidate.is_dir():
         fail(f"path is not a directory: {candidate}")
 
-    return candidate
-
-
-def resolve_git_root(path, purpose):
-    completed_process = run_command(
-        ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
-        cwd=path,
-        capture_output=True,
-        label="git",
-    )
-
-    git_root_text = completed_process.stdout.strip()
-
-    if not git_root_text:
-        fail(f"could not determine {purpose} Git root from: {path}")
-
-    return Path(git_root_text).resolve()
-
-
-def resolve_application_layout(path):
-    candidate = resolve_existing_directory(path)
-
-    if candidate.name == ANSIROVER_DIR_NAME:
-        direct_compose_path = candidate / COMPOSE_FILE_NAME
-
-        if direct_compose_path.is_file():
-            application_root = candidate.parent
-            ansirover_dir = candidate
-            application_git_root = resolve_git_root(
-                application_root,
-                "application",
-            )
-
-            if application_git_root != application_root:
-                fail(
-                    "the parent of ansirover/ must be the root of its application Git "
-                    f"repository: {application_root}"
-                )
-
-            return (
-                application_root,
-                application_git_root,
-                ansirover_dir,
-                direct_compose_path,
-            )
-
-    candidate_git_root = resolve_git_root(candidate, "application")
-    candidate_ansirover_dir = candidate_git_root / ANSIROVER_DIR_NAME
-    candidate_compose_path = candidate_ansirover_dir / COMPOSE_FILE_NAME
-
-    if candidate_compose_path.is_file():
-        return (
-            candidate_git_root,
-            candidate_git_root,
-            candidate_ansirover_dir,
-            candidate_compose_path,
-        )
-
-    if (
-        candidate_git_root.name == ANSIROVER_DIR_NAME
-        and (candidate_git_root / COMPOSE_FILE_NAME).is_file()
-    ):
-        application_root = candidate_git_root.parent
-        application_git_root = resolve_git_root(
-            application_root,
-            "application",
-        )
-
+    if candidate.name == ANSIROVER_DIR_NAME and (candidate / COMPOSE_FILE_NAME).is_file():
+        application_root = candidate.parent
+        application_git_root = git_root(application_root, "application")
         if application_git_root != application_root:
-            fail(
-                "the parent of the ansirover submodule must be the root of its "
-                f"application Git repository: {application_root}"
-            )
+            fail(f"the parent of ansirover/ must be the application Git root: {application_root}")
+        return application_root, application_git_root, candidate, candidate / COMPOSE_FILE_NAME
 
-        return (
-            application_root,
-            application_git_root,
-            candidate_git_root,
-            candidate_git_root / COMPOSE_FILE_NAME,
-        )
+    candidate_git_root = git_root(candidate, "application")
+    ansirover_dir = candidate_git_root / ANSIROVER_DIR_NAME
+    compose_path = ansirover_dir / COMPOSE_FILE_NAME
+    if compose_path.is_file():
+        return candidate_git_root, candidate_git_root, ansirover_dir, compose_path
 
-    fail(
-        "could not find the application AnsiRover Compose file. Expected "
-        f"<application-git-root>/{ANSIROVER_DIR_NAME}/{COMPOSE_FILE_NAME}"
+    if candidate_git_root.name == ANSIROVER_DIR_NAME and (candidate_git_root / COMPOSE_FILE_NAME).is_file():
+        application_root = candidate_git_root.parent
+        application_git_root = git_root(application_root, "application")
+        if application_git_root != application_root:
+            fail(f"the parent of the ansirover submodule must be the application Git root: {application_root}")
+        return application_root, application_git_root, candidate_git_root, candidate_git_root / COMPOSE_FILE_NAME
+
+    fail(f"expected <application-git-root>/{ANSIROVER_DIR_NAME}/{COMPOSE_FILE_NAME}")
+
+
+def require_flat_ansirover(ansirover_dir):
+    nested = sorted(
+        child.name
+        for child in ansirover_dir.iterdir()
+        if child.is_dir() and not child.name.startswith(".")
     )
+    if nested:
+        fail("ansirover/ must be flat; subdirectories are not supported: " + ", ".join(nested))
 
 
-def ensure_ansirover_is_flat(ansirover_dir):
-    nested_directories = []
-
-    for child in ansirover_dir.iterdir():
-        if not child.is_dir():
-            continue
-
-        if child.name.startswith("."):
-            continue
-
-        nested_directories.append(child.name)
-
-    if not nested_directories:
-        return
-
-    nested_directories.sort()
-    fail(
-        "ansirover/ must be flat; subdirectories are not supported: "
-        + ", ".join(nested_directories)
-    )
-
-
-def get_image_tag(source_git_root):
-    completed_process = run_command(
-        ["git", "-C", str(source_git_root), "rev-parse", "--short", "HEAD"],
-        cwd=source_git_root,
-        capture_output=True,
-        label="git",
-    )
-
-    image_tag = completed_process.stdout.strip()
-
-    if not image_tag:
-        fail("git rev-parse --short HEAD returned an empty value")
-
-    return image_tag
-
-
-def warn_if_git_worktree_is_dirty(source_git_root):
-    completed_process = run_command(
-        ["git", "-C", str(source_git_root), "status", "--porcelain"],
-        cwd=source_git_root,
-        capture_output=True,
-        label="git",
-    )
-
-    dirty_lines = []
-
-    for line in completed_process.stdout.splitlines():
-        if line.strip():
-            dirty_lines.append(line)
-
-    if not dirty_lines:
-        return
-
-    info("[warn] Source Git working tree is dirty.")
-    info(
-        "[warn] IMAGE_TAG identifies committed HEAD only; the Docker build context "
-        "may include uncommitted changes."
-    )
-    info(f"[warn] Dirty paths reported by Git: {len(dirty_lines)}")
-
-
-def get_compose_environment(image_tag):
+def compose_model(ansirover_dir, compose_path, image_tag):
     environment = os.environ.copy()
     environment["IMAGE_TAG"] = image_tag
+    completed = run(
+        ["docker", "compose", "-f", str(compose_path), "config", "--format", "json"],
+        cwd=ansirover_dir,
+        environment=environment,
+        capture=True,
+        label="compose config",
+    )
+    try:
+        model = json.loads(completed.stdout)
+    except json.JSONDecodeError as error:
+        fail(f"docker compose config returned invalid JSON: {error}")
+    if not isinstance(model, dict):
+        fail("docker compose config did not return an object")
+    return model
+
+
+def single_service(model):
+    services = model.get("services")
+    if not isinstance(services, dict) or len(services) != 1:
+        fail("ansirover/compose.yaml must define exactly one service")
+    service_name = next(iter(services))
+    definition = services[service_name]
+    if not isinstance(definition, dict) or definition.get("build") in (None, False):
+        fail(f"Compose service {service_name!r} must define build configuration")
+    return service_name, definition
+
+
+def build_context(ansirover_dir, service_name, definition):
+    build_definition = definition.get("build")
+    if isinstance(build_definition, str):
+        context_value = build_definition
+    elif isinstance(build_definition, dict):
+        context_value = str(build_definition.get("context", "."))
+    else:
+        fail(f"Compose service {service_name!r} has unsupported build configuration")
+    normalized = context_value.strip()
+    if normalized.startswith(("http://", "https://", "git://", "ssh://", "git@")):
+        fail(f"Compose service {service_name!r} must use a local build.context")
+    path = Path(normalized).expanduser()
+    if not path.is_absolute():
+        path = ansirover_dir / path
+    path = path.resolve()
+    if not path.is_dir():
+        fail(f"Compose service {service_name!r} build.context is not a directory: {path}")
+    return path
+
+
+def dockerfile_path(context, service_name, definition):
+    build_definition = definition.get("build")
+    if not isinstance(build_definition, dict):
+        return context / "Dockerfile"
+    if build_definition.get("dockerfile_inline") is not None:
+        return None
+    value = str(build_definition.get("dockerfile", "Dockerfile")).strip()
+    if not value:
+        fail(f"Compose service {service_name!r} has an empty build.dockerfile")
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = context / path
+    return path.resolve()
+
+
+def normalized_ignore_rule(line):
+    value = line.strip()
+    while value.startswith("./"):
+        value = value[2:]
+    return value.replace("\\", "/").strip("/")
+
+
+def validate_dockerignore(context, ansirover_dir, service_name, definition):
+    relative_ansirover = relative_path(context, ansirover_dir)
+    if relative_ansirover is None:
+        return None
+    if str(relative_ansirover) == ".":
+        fail("ansirover/ cannot itself be build.context")
+
+    dockerfile = dockerfile_path(context, service_name, definition)
+    ignore_path = context / ".dockerignore"
+    if dockerfile is not None:
+        specific = dockerfile.with_name(dockerfile.name + ".dockerignore")
+        if specific.is_file():
+            ignore_path = specific
+    if not ignore_path.is_file():
+        fail(f"effective Docker ignore file does not exist: {ignore_path}")
+
+    required_rule = relative_ansirover.as_posix().strip("/")
+    required_index = None
+    negation_indexes = []
+    for index, line in enumerate(ignore_path.read_text(encoding="utf-8").splitlines()):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        is_negation = stripped.startswith("!")
+        rule = stripped
+        if is_negation:
+            rule = stripped[1:]
+        if is_negation:
+            negation_indexes.append(index)
+        if not is_negation and normalized_ignore_rule(rule) == required_rule:
+            required_index = index
+    if required_index is None:
+        fail(f"{ignore_path} must explicitly exclude {required_rule}/")
+    if any(index > required_index for index in negation_indexes):
+        fail(f"move the {required_rule}/ exclusion after all negation rules in {ignore_path}")
+    return ignore_path
+
+
+def require_clean_source(source_git_root, ansirover_dir):
+    command = [
+        "git", "-C", str(source_git_root), "status", "--porcelain", "--untracked-files=all", "--", "."
+    ]
+    relative_ansirover = relative_path(source_git_root, ansirover_dir)
+    if relative_ansirover is not None:
+        command.append(f":(exclude){relative_ansirover.as_posix().strip('/')}")
+    completed = run(command, cwd=source_git_root, capture=True, label="git")
+    if completed.stdout.strip():
+        print(completed.stdout, file=sys.stderr, end="")
+        fail("the Git repository that owns build.context must be clean before image publication")
+
+
+def image_tag(source_git_root):
+    value = git_text(source_git_root, "rev-parse", "--short", "HEAD")
+    if not value:
+        fail("git rev-parse --short HEAD returned an empty value")
+    return value
+
+
+def validate_image(service_name, definition, expected_tag):
+    image_reference = str(definition.get("image") or "").strip()
+    if not image_reference:
+        fail(f"Compose service {service_name!r} must define image")
+    if not image_reference.startswith(REGISTRY_PREFIX):
+        fail(f"Compose service {service_name!r} must publish under {REGISTRY_PREFIX}")
+    if "@" in image_reference:
+        fail(f"Compose service {service_name!r} must use a tagged image reference")
+    repository, separator, resolved_tag = image_reference.rpartition(":")
+    if not separator or not repository:
+        fail(f"Compose service {service_name!r} image has no explicit tag")
+    if resolved_tag != expected_tag:
+        fail(f"Compose service {service_name!r} must resolve to :{expected_tag}, got :{resolved_tag}")
+    return image_reference
+
+
+def inventory_path(ansirover_dir, service_name):
+    path = ansirover_dir / f"{service_name}.yaml"
+    if not path.is_file():
+        fail(f"matching AnsiRover inventory not found: {path}")
+    return path
+
+
+def inventory_with_image(path, image_reference):
+    text = path.read_text(encoding="utf-8")
+    pattern = re.compile(r"^deployedImageName:\s*.*$", re.MULTILINE)
+    if len(pattern.findall(text)) != 1:
+        fail(f"{path} must contain exactly one top-level deployedImageName entry")
+    return pattern.sub("deployedImageName: " + image_reference, text, count=1)
+
+
+def allowlisted_paths(ansirover_dir, service_name, actual_dockerfile, effective_ignore):
+    paths = [ansirover_dir / COMPOSE_FILE_NAME, ansirover_dir / f"{service_name}.yaml"]
+    for suffix in SIDECAR_SUFFIXES:
+        path = ansirover_dir / f"{service_name}{suffix}"
+        if path.is_file():
+            paths.append(path)
+    for path in (actual_dockerfile, effective_ignore):
+        if path is not None and path.is_file() and relative_path(ansirover_dir, path) is not None and path not in paths:
+            paths.append(path)
+    return paths
+
+
+def publication_target(repository):
+    branch = git_text(repository, "symbolic-ref", "--quiet", "--short", "HEAD")
+    origin = git_text(repository, "remote", "get-url", "origin")
+    git_text(repository, "config", "--get", "user.name")
+    git_text(repository, "config", "--get", "user.email")
+    return branch, origin
+
+
+def noninteractive_git_environment():
+    environment = os.environ.copy()
+    environment["GIT_TERMINAL_PROMPT"] = "0"
+    environment["GCM_INTERACTIVE"] = "Never"
+    if "GIT_SSH_COMMAND" not in environment:
+        environment["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes"
     return environment
 
 
-def load_compose_model(ansirover_dir, compose_path, image_tag):
-    environment = get_compose_environment(image_tag)
-    completed_process = run_command(
-        [
-            "docker",
-            "compose",
-            "-f",
-            str(compose_path),
-            "config",
-            "--format",
-            "json",
-        ],
+def commit_paths(repository, paths, message):
+    relative_paths = []
+    for path in paths:
+        relative = relative_path(repository, path.resolve())
+        if relative is None:
+            fail(f"path is outside Git repository {repository}: {path}")
+        relative_paths.append(relative.as_posix())
+    status = git_text(repository, "status", "--porcelain", "--untracked-files=all", "--", *relative_paths)
+    if not status:
+        return False
+    run(["git", "-C", str(repository), "add", "--", *relative_paths], cwd=repository, label="git add")
+    run(
+        ["git", "-C", str(repository), "commit", "--only", "-m", message, "--", *relative_paths],
+        cwd=repository,
+        label="git commit",
+    )
+    return True
+
+
+def push_branch(repository, branch):
+    run(
+        ["git", "-C", str(repository), "push", "origin", f"HEAD:{branch}"],
+        cwd=repository,
+        environment=noninteractive_git_environment(),
+        label="git push",
+    )
+
+
+def build_and_push(ansirover_dir, compose_path, tag):
+    environment = os.environ.copy()
+    environment["IMAGE_TAG"] = tag
+    run(
+        ["docker", "compose", "-f", str(compose_path), "build", "--push"],
         cwd=ansirover_dir,
-        env=environment,
-        capture_output=True,
-        label="compose config",
-    )
-
-    try:
-        compose_model = json.loads(completed_process.stdout)
-    except json.JSONDecodeError as error:
-        print_process_output(completed_process)
-        fail(f"docker compose config returned invalid JSON: {error}")
-
-    if not isinstance(compose_model, dict):
-        fail("docker compose config did not return an object")
-
-    return compose_model
-
-
-def get_single_build_service(compose_model):
-    services = compose_model.get("services")
-
-    if not isinstance(services, dict):
-        fail("Compose model does not contain a services mapping")
-
-    if len(services) != 1:
-        fail(
-            "ansirover/compose.yaml must define exactly one service. "
-            "AnsiRover contract: one Compose file = one app = one service."
-        )
-
-    service_name = next(iter(services))
-    service_definition = services[service_name]
-
-    if not isinstance(service_definition, dict):
-        fail(f"Compose service {service_name!r} is not an object")
-
-    build_definition = service_definition.get("build")
-
-    if build_definition is None or build_definition is False:
-        fail(f"Compose service {service_name!r} must define build configuration")
-
-    return service_name, service_definition
-
-
-def get_build_context_value(service_name, service_definition):
-    build_definition = service_definition.get("build")
-
-    if isinstance(build_definition, str):
-        return build_definition
-
-    if isinstance(build_definition, dict):
-        context_value = build_definition.get("context")
-
-        if context_value is None:
-            return "."
-
-        return str(context_value)
-
-    fail(f"Compose service {service_name!r} has unsupported build configuration")
-
-
-def resolve_build_context(ansirover_dir, service_name, service_definition):
-    context_value = get_build_context_value(
-        service_name,
-        service_definition,
-    )
-    normalized_value = context_value.strip()
-
-    remote_prefixes = (
-        "http://",
-        "https://",
-        "git://",
-        "ssh://",
-        "git@",
-    )
-
-    if normalized_value.startswith(remote_prefixes):
-        fail(
-            f"Compose service {service_name!r} must use a local build.context so "
-            "AnsiRover can derive IMAGE_TAG from the owning Git repository: "
-            f"{normalized_value}"
-        )
-
-    context_path = Path(normalized_value).expanduser()
-
-    if not context_path.is_absolute():
-        context_path = ansirover_dir / context_path
-
-    resolved_context = context_path.resolve()
-
-    if not resolved_context.exists():
-        fail(
-            f"Compose service {service_name!r} build.context does not exist: "
-            f"{resolved_context}"
-        )
-
-    if not resolved_context.is_dir():
-        fail(
-            f"Compose service {service_name!r} build.context is not a directory: "
-            f"{resolved_context}"
-        )
-
-    return resolved_context
-
-
-def validate_published_image(service_name, image_reference, image_tag):
-    normalized_image_reference = str(image_reference or "").strip()
-
-    if not normalized_image_reference:
-        fail(
-            f"Compose service {service_name!r} has build configuration but no image name"
-        )
-
-    if not normalized_image_reference.startswith(REGISTRY_PREFIX):
-        fail(
-            f"Compose service {service_name!r} must publish under {REGISTRY_PREFIX}; "
-            f"resolved image: {normalized_image_reference}"
-        )
-
-    if "@" in normalized_image_reference:
-        fail(
-            f"Compose service {service_name!r} resolved to a digest reference; "
-            f"the build/push image must use IMAGE_TAG={image_tag}: "
-            f"{normalized_image_reference}"
-        )
-
-    repository, separator, resolved_tag = normalized_image_reference.rpartition(":")
-
-    if not separator or not repository:
-        fail(
-            f"Compose service {service_name!r} image has no explicit tag: "
-            f"{normalized_image_reference}"
-        )
-
-    if resolved_tag != image_tag:
-        fail(
-            f"Compose service {service_name!r} must resolve to the short HEAD of the "
-            "Git repository that owns build.context. "
-            f"Expected :{image_tag}, got :{resolved_tag}. "
-            "Use ${IMAGE_TAG:-beta} or another Compose interpolation that honors "
-            "IMAGE_TAG."
-        )
-
-    return normalized_image_reference
-
-
-def print_plan(
-    application_root,
-    application_git_root,
-    ansirover_dir,
-    compose_path,
-    service_name,
-    build_context,
-    source_git_root,
-    image_tag,
-    image_reference,
-    dry_run,
-):
-    info("")
-    info("=" * 88)
-    info("== AnsiRover Compose build/push plan ==")
-    info("=" * 88)
-    info(f"[plan] Application root: {application_root}")
-    info(f"[plan] Application Git root: {application_git_root}")
-    info(f"[plan] AnsiRover directory: {ansirover_dir}")
-    info(f"[plan] Compose file: {compose_path}")
-    info(f"[plan] Service: {service_name}")
-    info(f"[plan] Build context: {build_context}")
-    info(f"[plan] Source Git root: {source_git_root}")
-    info(f"[plan] Registry prefix: {REGISTRY_PREFIX}")
-    info(f"[plan] IMAGE_TAG: {image_tag}")
-    info(f"[plan] Image: {image_reference}")
-    info(f"[plan] Dry run: {dry_run}")
-    info("=" * 88)
-
-
-def build_and_push(ansirover_dir, compose_path, image_tag):
-    environment = get_compose_environment(image_tag)
-    run_command(
-        [
-            "docker",
-            "compose",
-            "-f",
-            str(compose_path),
-            "build",
-            "--push",
-        ],
-        cwd=ansirover_dir,
-        env=environment,
-        capture_output=False,
+        environment=environment,
         label="build/push",
     )
 
 
-def print_usage_and_guide():
+def print_usage():
     print("""Usage:
-  ansirover-compose-build-push <path> [options]
+  ansirover-compose-build-push <path> [--dry-run]
 
-Purpose:
-  Build and push the single Docker Compose service defined by:
+Contract:
+  one Git repository = one deployable app
+  one ansirover/ = one app inventory
+  one compose.yaml = one service = one image
+  source Git repository must be clean
+  ansirover/ must be excluded from build.context
 
-    <application-git-root>/ansirover/compose.yaml
-
-Arguments:
-  <path>
-      Path inside the target application Git repository, or its ansirover/
-      directory.
-
-      Use "." for the current application repository.
-
-Options:
-  --dry-run
-      Validate the repository and resolved Compose model and print
-      the build/push plan without building or pushing.
-
-  -h, --help
-      Show this help.
-
-Repository contract:
-  One Git repository = one deployable app.
-  Monorepos are not supported.
-  Multiple apps under a parent project must be separate Git repositories,
-  normally composed as Git submodules.
-  ansirover/ is flat; per-app subdirectories are not supported.
-  ansirover/compose.yaml defines exactly one service.
-  One Compose file = one AnsiRover app = one service = one image.
-
-Image tag:
-  IMAGE_TAG is the short HEAD of the Git repository that owns the resolved
-  build.context, not necessarily the repository that owns ansirover/.
+Behavior:
+  Builds and pushes the image, updates <service>.yaml deployedImageName,
+  commits/pushes only known AnsiRover files, and updates/pushes the parent
+  gitlink when ansirover/ is a submodule. Never prompts for input.
 
 Examples:
   ansirover-compose-build-push .
-  ansirover-compose-build-push /Volumes/FrgGit/tictactoe
   ansirover-compose-build-push ./ansirover
   ansirover-compose-build-push . --dry-run
-
-Registry:
-  cr.umapps.net/umapps/
-
-Behavior:
-  Running this command without arguments only prints this usage
-  message and performs no action.
 """)
 
 
-def parse_args(arguments=None):
-    parser = argparse.ArgumentParser(
-        add_help=False,
-        description=(
-            "Build and push the single Docker Compose service from "
-            "<application-git-root>/ansirover/compose.yaml."
-        ),
-    )
-    parser.add_argument(
-        "path",
-        help=(
-            "path inside the target application Git repository or its ansirover/ "
-            "directory; use . for the current application repository"
-        ),
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help=(
-            "validate the repository and Compose model and print the plan without "
-            "building or pushing"
-        ),
-    )
+def parse_args(arguments):
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("path")
+    parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(arguments)
 
 
 def main(arguments=None):
-    raw_arguments = []
-
-    if arguments is None:
-        raw_arguments = sys.argv[1:]
-    else:
+    raw_arguments = sys.argv[1:]
+    if arguments is not None:
         raw_arguments = list(arguments)
-
-    if not raw_arguments:
-        print_usage_and_guide()
-        return 0
-
-    if "-h" in raw_arguments or "--help" in raw_arguments:
-        print_usage_and_guide()
+    if not raw_arguments or "-h" in raw_arguments or "--help" in raw_arguments:
+        print_usage()
         return 0
 
     args = parse_args(raw_arguments)
-    (
-        application_root,
-        application_git_root,
-        ansirover_dir,
-        compose_path,
-    ) = resolve_application_layout(args.path)
+    application_root, application_git_root, ansirover_dir, compose_path = resolve_layout(args.path)
+    require_flat_ansirover(ansirover_dir)
+    ansirover_git_root = git_root(ansirover_dir, "AnsiRover")
+    if ansirover_git_root not in (application_git_root, ansirover_dir):
+        fail("ansirover/ must belong to the application repo or be its own submodule repo")
 
-    ensure_ansirover_is_flat(ansirover_dir)
+    ansirover_branch, ansirover_origin = publication_target(ansirover_git_root)
+    application_branch, application_origin = ansirover_branch, ansirover_origin
+    if ansirover_git_root != application_git_root:
+        application_branch, application_origin = publication_target(application_git_root)
 
-    discovery_model = load_compose_model(
-        ansirover_dir=ansirover_dir,
-        compose_path=compose_path,
-        image_tag=DISCOVERY_IMAGE_TAG,
-    )
-    service_name, discovery_service_definition = get_single_build_service(
-        discovery_model
-    )
-    build_context = resolve_build_context(
-        ansirover_dir,
-        service_name,
-        discovery_service_definition,
-    )
-    source_git_root = resolve_git_root(
-        build_context,
-        "build.context source",
-    )
-    image_tag = get_image_tag(source_git_root)
-    warn_if_git_worktree_is_dirty(source_git_root)
+    discovery = compose_model(ansirover_dir, compose_path, DISCOVERY_IMAGE_TAG)
+    service_name, discovery_definition = single_service(discovery)
+    app_inventory = inventory_path(ansirover_dir, service_name)
+    context = build_context(ansirover_dir, service_name, discovery_definition)
+    source_git_root = git_root(context, "build.context source")
+    discovery_ignore = validate_dockerignore(context, ansirover_dir, service_name, discovery_definition)
+    require_clean_source(source_git_root, ansirover_dir)
+    tag = image_tag(source_git_root)
 
-    compose_model = load_compose_model(
-        ansirover_dir=ansirover_dir,
-        compose_path=compose_path,
-        image_tag=image_tag,
-    )
-    resolved_service_name, service_definition = get_single_build_service(compose_model)
-
+    resolved = compose_model(ansirover_dir, compose_path, tag)
+    resolved_service_name, definition = single_service(resolved)
     if resolved_service_name != service_name:
-        fail(
-            "Compose service name changed while resolving IMAGE_TAG; "
-            "service discovery must be deterministic"
-        )
+        fail("Compose service name changed while applying IMAGE_TAG")
+    resolved_context = build_context(ansirover_dir, service_name, definition)
+    if resolved_context != context:
+        fail("build.context must not depend on IMAGE_TAG")
+    effective_ignore = validate_dockerignore(context, ansirover_dir, service_name, definition)
+    if effective_ignore != discovery_ignore:
+        fail("effective Docker ignore file must not depend on IMAGE_TAG")
+    actual_dockerfile = dockerfile_path(context, service_name, definition)
+    image_reference = validate_image(service_name, definition, tag)
+    inventory_with_image(app_inventory, image_reference)
 
-    resolved_build_context = resolve_build_context(
-        ansirover_dir,
-        resolved_service_name,
-        service_definition,
-    )
+    info(f"[plan] service: {service_name}")
+    info(f"[plan] source Git root: {source_git_root}")
+    info(f"[plan] IMAGE_TAG: {tag}")
+    info(f"[plan] image: {image_reference}")
 
-    if resolved_build_context != build_context:
-        fail(
-            "build.context changed when IMAGE_TAG was applied. "
-            "build.context must not depend on IMAGE_TAG."
-        )
-
-    image_reference = validate_published_image(
-        service_name=resolved_service_name,
-        image_reference=service_definition.get("image"),
-        image_tag=image_tag,
-    )
-
-    print_plan(
-        application_root=application_root,
-        application_git_root=application_git_root,
-        ansirover_dir=ansirover_dir,
-        compose_path=compose_path,
-        service_name=resolved_service_name,
-        build_context=build_context,
-        source_git_root=source_git_root,
-        image_tag=image_tag,
-        image_reference=image_reference,
-        dry_run=args.dry_run,
-    )
-
+    ansirover_committed = False
+    gitlink_committed = False
     if not args.dry_run:
-        build_and_push(
-            ansirover_dir=ansirover_dir,
-            compose_path=compose_path,
-            image_tag=image_tag,
+        build_and_push(ansirover_dir, compose_path, tag)
+        app_inventory.write_text(inventory_with_image(app_inventory, image_reference), encoding="utf-8")
+        paths = allowlisted_paths(ansirover_dir, service_name, actual_dockerfile, effective_ignore)
+        ansirover_committed = commit_paths(
+            ansirover_git_root,
+            paths,
+            f"chore: publish {service_name} {tag}",
         )
+        push_branch(ansirover_git_root, ansirover_branch)
+        if ansirover_git_root != application_git_root:
+            gitlink_committed = commit_paths(
+                application_git_root,
+                [ansirover_dir],
+                f"chore: update ansirover for {service_name} {tag}",
+            )
+            push_branch(application_git_root, application_branch)
 
-    result("IMAGE_TAG=" + image_tag)
-    result("APPLICATION_ROOT=" + str(application_root))
-    result("APPLICATION_GIT_ROOT=" + str(application_git_root))
-    result("ANSIROVER_DIR=" + str(ansirover_dir))
-    result("COMPOSE_FILE=" + str(compose_path))
-    result("SERVICE=" + resolved_service_name)
-    result("BUILD_CONTEXT=" + str(build_context))
-    result("SOURCE_GIT_ROOT=" + str(source_git_root))
-    result("IMAGE_COUNT=1")
-    result("IMAGE=" + image_reference)
-
-    build_push_completed = "true"
-
-    if args.dry_run:
-        build_push_completed = "false"
-
-    result("BUILD_PUSH_COMPLETED=" + build_push_completed)
+    print("IMAGE_TAG=" + tag)
+    print("IMAGE=" + image_reference)
+    print("SOURCE_GIT_ROOT=" + str(source_git_root))
+    print("ANSIROVER_GIT_ROOT=" + str(ansirover_git_root))
+    print("ANSIROVER_BRANCH=" + ansirover_branch)
+    print("ANSIROVER_ORIGIN=" + ansirover_origin)
+    print("APPLICATION_BRANCH=" + application_branch)
+    print("APPLICATION_ORIGIN=" + application_origin)
+    print("BUILD_PUSH_COMPLETED=" + str(not args.dry_run).lower())
+    print("ANSIROVER_COMMITTED=" + str(ansirover_committed).lower())
+    print("APPLICATION_GITLINK_COMMITTED=" + str(gitlink_committed).lower())
+    print("GIT_PUBLICATION_COMPLETED=" + str(not args.dry_run).lower())
     return 0
 
 
