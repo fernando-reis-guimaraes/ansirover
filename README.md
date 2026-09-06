@@ -7,6 +7,7 @@ The toolset is installed into `~/bin` as a Git submodule under `.packages/ansiro
 ## Command inventory
 
 ```text
+ansirover-compose-build-push
 ansirover-delete-app-safely
 ansirover-delete-app-without-local-backup
 ansirover-download-backup
