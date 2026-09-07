@@ -56,6 +56,7 @@ class BuildPushTests(unittest.TestCase):
             app = Path(directory)
             ansirover = app / "ansirover"
             ansirover.mkdir()
+            init_repo(app)
             definition = {"build": {"context": ".."}}
             with self.assertRaises(SystemExit):
                 MODULE.validate_dockerignore(app, ansirover, "app", definition)
@@ -69,6 +70,32 @@ class BuildPushTests(unittest.TestCase):
                 ignore,
             )
 
+    def test_missing_dockerignore_rule_prints_safe_fix_commands(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = Path(directory) / "app"
+            ansirover = app / "ansirover"
+            ansirover.mkdir(parents=True)
+            init_repo(app)
+            ignore = app / ".dockerignore"
+            ignore.write_text("node_modules", encoding="utf-8")
+            definition = {"build": {"context": ".."}}
+            stderr = io.StringIO()
+
+            with contextlib.redirect_stderr(stderr):
+                with self.assertRaises(SystemExit):
+                    MODULE.validate_dockerignore(app, ansirover, "app", definition)
+
+            output = stderr.getvalue()
+            self.assertIn("Fix and continue with:", output)
+            self.assertIn("printf '\\n%s\\n' ansirover/ >>", output)
+            self.assertIn(f"git -C {app} add -- .dockerignore", output)
+            self.assertIn(
+                "commit --only -m 'chore: exclude ansirover from Docker context' -- .dockerignore",
+                output,
+            )
+            self.assertIn(f"git -C {app} push origin HEAD", output)
+            self.assertIn(f"ansirover-compose-build-push {app}", output)
+
     def test_dockerfile_specific_ignore_takes_precedence(self):
         with tempfile.TemporaryDirectory() as directory:
             app = Path(directory)
@@ -76,6 +103,7 @@ class BuildPushTests(unittest.TestCase):
             docker_dir = app / "docker"
             ansirover.mkdir()
             docker_dir.mkdir()
+            init_repo(app)
             (app / ".dockerignore").write_text("ansirover/\n", encoding="utf-8")
             dockerfile = docker_dir / "build.Dockerfile"
             dockerfile.write_text("FROM scratch\n", encoding="utf-8")
