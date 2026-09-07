@@ -456,7 +456,7 @@ FROM node:22
 The established base-image repository naming example is:
 
 ```text
-GitHub repository: fernando-reis-guimaraes/cr.umapps.net_umapps_node22
+GitHub repository: fernando-reis-guimaraes/cr_umapps_net_umapps_node22
 Registry image:    cr.umapps.net/umapps/node22
 Compose service:   umapps_node22
 ```
