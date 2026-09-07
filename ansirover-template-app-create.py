@@ -37,7 +37,9 @@ def validate_simple_name(label, value):
 
 
 def resolve_app_dir(current_dir, app_name):
-    if current_dir.name.lower() == app_name.lower():
+    current_dir_name = current_dir.name.lower()
+
+    if current_dir_name in {app_name.lower(), "ansirover"}:
         return current_dir
 
     return current_dir / app_name
@@ -243,6 +245,7 @@ server {
 }
 """.replace("__APP_NAME__", app_name)
 
+
 def render_pre_deploy(app_name):
     return f"""// DELETE THIS FILE IF THE APP DOES NOT NEED A PRE-DEPLOY FUNCTION.
 // AnsiRover pre-deploy function sidecar for {app_name}.
@@ -429,16 +432,16 @@ Bind mounts are not copied by the named-volume backup flow. If the app uses bind
 
 ## Deploy this app
 
-From the parent directory of this app folder:
+From this AnsiRover folder or by passing its path explicitly:
 
 ```bash
-ansirover-restore-upload <server-name> {app_name} ./{app_name} --with-image --with-volumes --wait-deploy
+ansirover-restore-upload <server-name> {app_name} . --with-image --with-volumes --wait-deploy
 ```
 
 Example:
 
 ```bash
-ansirover-restore-upload storage {app_name} ./{app_name} --with-image --with-volumes --wait-deploy
+ansirover-restore-upload storage {app_name} . --with-image --with-volumes --wait-deploy
 ```
 
 If the app uses only a public Docker Hub image and no volume archives, the restore command may not need `--with-image` or `--with-volumes`.
@@ -448,13 +451,13 @@ If the app uses only a public Docker Hub image and no volume archives, the resto
 After the app is correct on CapRover, refresh this local folder from the server:
 
 ```bash
-ansirover-download-backup <server-name> {app_name} ./{app_name} --with-image --with-volumes --force
+ansirover-download-backup <server-name> {app_name} . --with-image --with-volumes --force
 ```
 
 Example:
 
 ```bash
-ansirover-download-backup storage {app_name} ./{app_name} --with-image --with-volumes --force
+ansirover-download-backup storage {app_name} . --with-image --with-volumes --force
 ```
 
 This updates the local AnsiRover YAML, JSON, sidecars, image archive and named-volume archives when requested.
@@ -484,6 +487,7 @@ Usually ignore large/generated archives:
 
 {guide}
 """
+
 
 def render_ai_guide(app_name):
     return f"""## AnsiRover quick guide for AI/tools
@@ -545,11 +549,11 @@ Download/refresh backup from a CapRover server:
 ansirover-download-backup <server-name> {app_name} <path-to-this-folder> --with-image --with-volumes --force
 ```
 
-Examples:
+Examples from inside this folder:
 
 ```bash
-ansirover-restore-upload storage {app_name} ./{app_name} --with-image --with-volumes --wait-deploy
-ansirover-download-backup storage {app_name} ./{app_name} --with-image --with-volumes --force
+ansirover-restore-upload storage {app_name} . --with-image --with-volumes --wait-deploy
+ansirover-download-backup storage {app_name} . --with-image --with-volumes --force
 ```
 """
 
@@ -565,20 +569,20 @@ Options:
   --with-examples      Default behavior. Create YAML plus example sidecars.
   --force              Overwrite existing files.
 
+Directory behavior:
+  If the current directory is named ansirover, create the app files directly there.
+  If the current directory already matches <app-name>, create the files directly there.
+  Otherwise create a new <app-name>/ directory under the current directory.
+
 Purpose:
   Create a local AnsiRover app template that an AI or human can edit, then deploy with
   ansirover-restore-upload.
 
 Workflow:
   1. ansirover-template-app-create meu-app
-  2. Edit meu-app/meu-app.yaml and sidecars.
-  3. Deploy:
-
-     ansirover-restore-upload <server-name> meu-app ./meu-app --with-image --with-volumes --wait-deploy
-
-  4. Later, download/refresh the backup:
-
-     ansirover-download-backup <server-name> meu-app ./meu-app --with-image --with-volumes --force
+  2. Edit the generated meu-app.yaml and sidecars in APP_TEMPLATE_DIR.
+  3. Deploy from that directory or pass APP_TEMPLATE_DIR explicitly to ansirover-restore-upload.
+  4. Later, download/refresh the backup into that same directory.
 
 AnsiRover format:
   The main file is <app-name>.yaml. Sidecars are optional files with the same prefix:
