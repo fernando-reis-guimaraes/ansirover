@@ -1,2 +1,2 @@
 # shellcheck shell=bash
-exec "$HOME/bin/.packages/ansirover/ansirover-delete-app-without-local-backup.py" "$@"
+exec python3 "$HOME/bin/.packages/ansirover/ansirover-machine-target-exec.py" "ansirover-delete-app-without-local-backup.py" "$@"
