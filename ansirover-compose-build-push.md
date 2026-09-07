@@ -147,6 +147,29 @@ If `ansirover/` is physically outside `build.context`, no ignore rule is require
 
 `ansirover/` itself cannot be used as `build.context`, because the AnsiRover directory must be excluded from image input.
 
+### Docker-ignore remediation output
+
+When the effective Docker ignore file is missing, does not contain the required AnsiRover exclusion, or has a later negation rule that can re-include it, the CLI exits with an error and prints copy/paste commands to fix the repository and continue the build.
+
+The remediation uses a leading newline deliberately:
+
+```bash
+printf '\n%s\n' ansirover/ >> /path/to/.dockerignore
+```
+
+This is safe when the existing ignore file has no trailing newline. It prevents the new rule from being concatenated to the previous rule.
+
+The generated Git commands are path-limited to the effective Docker ignore file:
+
+```text
+git -C <ignore-repository> add -- <ignore-file>
+git -C <ignore-repository> commit --only -m 'chore: exclude ansirover from Docker context' -- <ignore-file>
+git -C <ignore-repository> push origin HEAD
+ansirover-compose-build-push <absolute-application-root>
+```
+
+This avoids accidentally committing unrelated application or AnsiRover changes while fixing the publication prerequisite. If a Dockerfile-specific ignore file is effective, the generated commands target that file instead of the root `.dockerignore`.
+
 ## Two-phase Compose resolution
 
 The command resolves Compose twice but performs only one actual Docker build.
