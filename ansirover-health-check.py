@@ -61,6 +61,41 @@ def validate_simple_name(label, value):
         fail(f"{label} must not contain whitespace: {value}")
 
 
+def validate_caprover_machine_name(server_name):
+    validate_simple_name("server name", server_name)
+
+    if "@" in server_name:
+        fail(
+            "CapRover machine name must not contain @; "
+            "use --ssh-target=user@host for an explicit SSH target"
+        )
+
+
+def validate_ssh_target(ssh_target):
+    if not ssh_target:
+        fail("--ssh-target must not be empty")
+
+    if "\x00" in ssh_target:
+        fail("--ssh-target must not contain NUL byte")
+
+    if any(character.isspace() for character in ssh_target):
+        fail(f"--ssh-target must not contain whitespace: {ssh_target}")
+
+    if ssh_target.count("@") != 1:
+        fail(
+            "--ssh-target must use user@host with exactly one @, "
+            f"got: {ssh_target}"
+        )
+
+    user_name, host_name = ssh_target.split("@", 1)
+
+    if not user_name or not host_name:
+        fail(f"--ssh-target must use non-empty user@host components: {ssh_target}")
+
+    if "/" in user_name or "/" in host_name:
+        fail(f"--ssh-target must use user@host, not a URL or path: {ssh_target}")
+
+
 def resolve_single_app_dir(current_dir, app_name, path_value):
     if path_value:
         return Path(path_value).expanduser().resolve()
@@ -437,6 +472,7 @@ def derive_ssh_target_from_captain_url(captain_url):
 
 def resolve_ssh_target(server_name, override_ssh_target):
     if override_ssh_target:
+        validate_ssh_target(override_ssh_target)
         return override_ssh_target
 
     captain_url = find_captain_url_by_machine(load_caprover_config(), server_name)
@@ -923,7 +959,7 @@ def parse_args():
         )
     )
 
-    parser.add_argument("server_name", help="CapRover CLI server name, e.g. storage")
+    parser.add_argument("server_name", help="CapRover CLI machine name, e.g. storage; @ is not allowed")
     parser.add_argument("target", help="CapRover app name or all")
     parser.add_argument(
         "path",
@@ -934,7 +970,10 @@ def parse_args():
             "otherwise ./<app> or ./<server>."
         ),
     )
-    parser.add_argument("--ssh-target", help="override SSH target, e.g. root@example.com")
+    parser.add_argument(
+        "--ssh-target",
+        help="override SSH target; must use user@host, e.g. --ssh-target=root@example.com",
+    )
     parser.add_argument("--ssh-timeout", type=int, default=60, help="remote Docker inspection timeout in seconds; default: 60")
     parser.add_argument("--http-timeout", type=int, default=20, help="curl connect and total timeout in seconds; default: 20")
     parser.add_argument("--ignore", help="all mode only: comma-separated app names to skip")
@@ -946,7 +985,7 @@ def parse_args():
 
 def main():
     args = parse_args()
-    validate_simple_name("server name", args.server_name)
+    validate_caprover_machine_name(args.server_name)
 
     if args.ssh_timeout < 1:
         fail("--ssh-timeout must be >= 1")
