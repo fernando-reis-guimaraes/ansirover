@@ -69,9 +69,30 @@ For `ansirover-compose-build-push` and deployment automation, preserve these inv
 - Never force-push from `ansirover-compose-build-push`.
 - Keep CapRover deployment separate: image/Git publication uses `ansirover-compose-build-push`; applying inventory uses `ansirover-restore-upload`.
 
-## Machine resolution
+## Target grammar and machine resolution
 
-Commands that target a CapRover server take a machine name resolved from `~/.config/configstore/caprover.json`. Strip a leading `captain.` subdomain from the machine `baseUrl` to derive the SSH host; SSH as `root`.
+These rules apply to `ansirover-*` commands. Do not impose this lookup behavior on lower-level `caprover-*` helpers, which may intentionally work with direct SSH/server targets.
+
+- A bare server value such as `srv1` is always a CapRover machine name. Resolve it from `~/.config/configstore/caprover.json`.
+- Never fall back from a missing CapRover machine name to DNS, mDNS, Tailscale, `/etc/hosts`, or another hostname lookup. If `srv1` is both a valid hostname and a configured CapRover machine, the CapRover machine interpretation wins.
+- An AnsiRover CapRover machine name must not contain `@`. Reserve `@` for explicit SSH targets even if the upstream CapRover CLI would accept `@` in a machine name.
+- A direct SSH target is valid only on commands/options that explicitly support one, such as `--ssh-target=user@host`.
+- An explicit SSH target must use `user@host` with exactly one `@` and non-empty user and host components. Bare hostnames such as `storage`, `10.0.0.5`, or `storage.example.com` are not explicit SSH targets.
+- A direct Captain URL is valid only on commands that explicitly support URL mode. It must use `http://` or `https://` and is distinct from both machine-name lookup and SSH addressing.
+- When a machine name is resolved from CapRover config, strip a leading `captain.` subdomain from its `baseUrl` hostname to derive the default SSH host; SSH as `root` unless the command has an explicit `--ssh-target=user@host` override.
+
+Examples:
+
+```text
+srv1
+  -> CapRover machine-name lookup
+
+root@srv1
+  -> explicit SSH target, only where an SSH-target option is supported
+
+https://captain.srv1.umapps.net
+  -> explicit Captain URL, only where URL mode is supported
+```
 
 ## Tests
 
@@ -94,6 +115,13 @@ For `ansirover-compose-build-push`, regression tests must cover:
 - allowlisted commits that leave unknown files out;
 - non-interactive Git publication settings;
 - AnsiRover submodule layout handling.
+
+For target resolution, regression tests must cover:
+
+- bare CapRover machine names remain machine names and are resolved through CapRover config;
+- CapRover machine names containing `@` are rejected by AnsiRover;
+- explicit SSH targets require the exact `user@host` shape;
+- a missing machine name is never reinterpreted as a hostname.
 
 ## Safety
 
