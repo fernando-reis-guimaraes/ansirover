@@ -13,11 +13,41 @@ Examples:
 ```bash
 ansirover-health-check storage my-app ./my-app
 ansirover-health-check storage all ./storage
-ansirover-health-check storage all ./storage --ignore captain-dashboard,old-app
+ansirover-health-check storage all ./storage --ignore=captain-dashboard,old-app
 ansirover-health-check storage all ./storage --json
+ansirover-health-check storage my-app ./my-app --ssh-target=root@storage
 ```
 
 The app folder must contain `<app-name>.yaml`. In `all` mode, the base folder must contain one folder per CapRover app, each with its matching AnsiRover YAML file.
+
+## Server and SSH target grammar
+
+The positional `<server>` is always a CapRover CLI machine name and is resolved from `~/.config/configstore/caprover.json`.
+
+A bare value never falls back to hostname resolution. If `storage` is both a valid DNS/Tailscale hostname and a configured CapRover machine name, AnsiRover uses the CapRover machine configuration.
+
+AnsiRover machine names must not contain `@`. The `@` character is reserved for explicit SSH targets.
+
+Use `--ssh-target=user@host` only when the SSH host or username must differ from the default target derived from the CapRover machine configuration. The value must contain exactly one `@` with non-empty user and host components.
+
+Valid:
+
+```text
+server:      storage
+ssh target:  root@storage
+ssh target:  ubuntu@10.0.0.5
+```
+
+Invalid SSH targets:
+
+```text
+storage
+10.0.0.5
+storage.example.com
+@storage
+root@
+root@@storage
+```
 
 ## Checks
 
@@ -61,10 +91,10 @@ An unavailable mapping, a cancelled prompt, a bad password, or a non-APR1 hash f
 
 ## Options
 
-- `--ssh-target root@example.com`: override the SSH target derived from the stored CapRover CLI configuration.
-- `--ssh-timeout 60`: Docker-inspection SSH timeout in seconds.
-- `--http-timeout 20`: `curl` connect and total timeout in seconds.
-- `--ignore app1,app2`: skip named apps in `all` mode.
+- `--ssh-target=user@host`: override the SSH target derived from the stored CapRover CLI configuration. The value must use exactly one `@` with non-empty user and host components.
+- `--ssh-timeout=60`: Docker-inspection SSH timeout in seconds.
+- `--http-timeout=20`: `curl` connect and total timeout in seconds.
+- `--ignore=app1,app2`: skip named apps in `all` mode.
 - `--json`: emit detailed JSON results.
 - `--no-sort`: retain the CapRover API order in `all` mode.
 
