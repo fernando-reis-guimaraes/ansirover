@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 from datetime import datetime
@@ -196,6 +197,46 @@ def normalized_ignore_rule(line):
     return value.replace("\\", "/").strip("/")
 
 
+def fail_dockerignore_exclusion(message, ignore_path, required_rule, ansirover_dir):
+    ignore_repository = git_root(ignore_path.parent, "Docker ignore")
+    relative_ignore = relative_path(ignore_repository, ignore_path)
+    if relative_ignore is None:
+        fail(f"Docker ignore file is outside its Git repository: {ignore_path}")
+
+    quoted_rule = shlex.quote(required_rule + "/")
+    quoted_ignore_path = shlex.quote(str(ignore_path))
+    quoted_repository = shlex.quote(str(ignore_repository))
+    quoted_relative_ignore = shlex.quote(relative_ignore.as_posix())
+    quoted_commit_message = shlex.quote("chore: exclude ansirover from Docker context")
+    quoted_application_root = shlex.quote(str(ansirover_dir.parent))
+
+    print(f"ERROR: {message}", file=sys.stderr)
+    print("", file=sys.stderr)
+    print("Fix and continue with:", file=sys.stderr)
+    print(
+        f"  printf '\\n%s\\n' {quoted_rule} >> {quoted_ignore_path}",
+        file=sys.stderr,
+    )
+    print(
+        f"  git -C {quoted_repository} add -- {quoted_relative_ignore}",
+        file=sys.stderr,
+    )
+    print(
+        f"  git -C {quoted_repository} commit --only -m {quoted_commit_message} -- "
+        f"{quoted_relative_ignore}",
+        file=sys.stderr,
+    )
+    print(
+        f"  git -C {quoted_repository} push origin HEAD",
+        file=sys.stderr,
+    )
+    print(
+        f"  ansirover-compose-build-push {quoted_application_root}",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+
 def validate_dockerignore(context, ansirover_dir, service_name, definition):
     relative_ansirover = relative_path(context, ansirover_dir)
     if relative_ansirover is None:
@@ -203,6 +244,7 @@ def validate_dockerignore(context, ansirover_dir, service_name, definition):
     if str(relative_ansirover) == ".":
         fail("ansirover/ cannot itself be build.context")
 
+    required_rule = relative_ansirover.as_posix().strip("/")
     dockerfile = dockerfile_path(context, service_name, definition)
     ignore_path = context / ".dockerignore"
     if dockerfile is not None:
@@ -210,9 +252,13 @@ def validate_dockerignore(context, ansirover_dir, service_name, definition):
         if specific.is_file():
             ignore_path = specific
     if not ignore_path.is_file():
-        fail(f"effective Docker ignore file does not exist: {ignore_path}")
+        fail_dockerignore_exclusion(
+            f"effective Docker ignore file does not exist: {ignore_path}",
+            ignore_path,
+            required_rule,
+            ansirover_dir,
+        )
 
-    required_rule = relative_ansirover.as_posix().strip("/")
     required_index = None
     negation_indexes = []
     for index, line in enumerate(ignore_path.read_text(encoding="utf-8").splitlines()):
@@ -228,9 +274,19 @@ def validate_dockerignore(context, ansirover_dir, service_name, definition):
         if not is_negation and normalized_ignore_rule(rule) == required_rule:
             required_index = index
     if required_index is None:
-        fail(f"{ignore_path} must explicitly exclude {required_rule}/")
+        fail_dockerignore_exclusion(
+            f"{ignore_path} must explicitly exclude {required_rule}/",
+            ignore_path,
+            required_rule,
+            ansirover_dir,
+        )
     if any(index > required_index for index in negation_indexes):
-        fail(f"move the {required_rule}/ exclusion after all negation rules in {ignore_path}")
+        fail_dockerignore_exclusion(
+            f"move the {required_rule}/ exclusion after all negation rules in {ignore_path}",
+            ignore_path,
+            required_rule,
+            ansirover_dir,
+        )
     return ignore_path
 
 
