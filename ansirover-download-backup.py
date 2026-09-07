@@ -31,8 +31,6 @@ def result(message):
     print(message, flush=True)
 
 
-
-
 def get_retry_delays():
     return [2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0]
 
@@ -65,6 +63,7 @@ def get_ssh_command_prefix(ssh_target):
         ssh_target,
     ]
 
+
 def get_captain_password_env_name(server_name):
     normalized = re.sub(r"[^A-Za-z0-9]", "_", server_name).upper()
     normalized = re.sub(r"_+", "_", normalized).strip("_")
@@ -87,6 +86,17 @@ def validate_simple_name(label, value):
     if "\x00" in value:
         fail(f"{label} must not contain NUL byte")
 
+
+def validate_caprover_machine_name(server_name):
+    validate_simple_name("server name", server_name)
+
+    if "@" in server_name:
+        fail(
+            "CapRover machine name must not contain @; "
+            "AnsiRover reserves @ for explicit SSH targets in user@host form"
+        )
+
+
 CURRENT_APP_NAME = ""
 
 
@@ -100,7 +110,6 @@ def get_caprover_api_app_name(api_path, data):
         return match.group(1)
 
     return CURRENT_APP_NAME
-
 
 
 def run_caprover_api(server_name, api_path, method, data):
@@ -203,6 +212,7 @@ def run_caprover_api(server_name, api_path, method, data):
                 os.unlink(output_path)
 
     fail(last_error or f"CapRover API failed for {method} {api_path}")
+
 
 def extract_app_definitions_object(response):
     if isinstance(response, dict):
@@ -336,7 +346,6 @@ def get_bind_mounts(app_definition):
     return bind_mounts
 
 
-
 def write_bind_mounts_warning_file(app_dir, app_name, app_definition):
     warning_file_path = app_dir / (app_name + ".BIND-MOUNTS.txt")
     bind_mounts = get_bind_mounts(app_definition)
@@ -373,6 +382,7 @@ def write_bind_mounts_warning_file(app_dir, app_name, app_definition):
 
     warning_file_path.write_text("\n".join(lines), encoding="utf-8")
     info("[warn] bind mount warning file: " + str(warning_file_path))
+
 
 def get_caprover_root_domain(server_name):
     config_path = Path.home() / ".config" / "configstore" / "caprover.json"
@@ -604,7 +614,7 @@ def parse_args():
         )
     )
 
-    parser.add_argument("server_name", help="CapRover CLI server name, e.g. frginbox or storage")
+    parser.add_argument("server_name", help="CapRover CLI machine name, e.g. frginbox or storage; @ is not allowed")
     parser.add_argument("target", nargs="?", help="app name or all")
     parser.add_argument(
         "path",
@@ -647,7 +657,7 @@ def main():
     if args.target is None:
         infer_target_from_current_folder(args)
 
-    validate_simple_name("server name", args.server_name)
+    validate_caprover_machine_name(args.server_name)
 
     global CURRENT_APP_NAME
 
@@ -725,7 +735,6 @@ def main():
         )
 
         for app_definition in sorted_app_definitions:
-
             app_name = app_definition.get("appName")
 
             if not app_name:

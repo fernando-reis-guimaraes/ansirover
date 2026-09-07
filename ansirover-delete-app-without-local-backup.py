@@ -24,11 +24,34 @@ def password_env_name(server_name):
     return f"{normalized}_CAPTAIN_PASSWORD"
 
 
+def validate_caprover_machine_name(server_name):
+    if not server_name:
+        fail("server name must not be empty")
+
+    if "\x00" in server_name:
+        fail("server name must not contain NUL byte")
+
+    if "/" in server_name:
+        fail(f"server name must not contain slash: {server_name}")
+
+    if server_name in {".", ".."}:
+        fail("server name must not be . or ..")
+
+    if any(character.isspace() for character in server_name):
+        fail(f"server name must not contain whitespace: {server_name}")
+
+    if "@" in server_name:
+        fail(
+            "CapRover machine name must not contain @; "
+            "AnsiRover reserves @ for explicit SSH targets in user@host form"
+        )
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Delete one CapRover app without requiring a local backup."
     )
-    parser.add_argument("server_name")
+    parser.add_argument("server_name", help="CapRover CLI machine name; @ is not allowed")
     parser.add_argument("app_name")
     parser.add_argument(
         "--force",
@@ -88,8 +111,10 @@ def delete_app(server_name, app_name):
 def main():
     args = parse_args()
 
-    if not args.server_name or not args.app_name:
-        fail("server name and app name must not be empty")
+    if not args.app_name:
+        fail("app name must not be empty")
+
+    validate_caprover_machine_name(args.server_name)
 
     if not args.force:
         confirm(args.server_name, args.app_name)

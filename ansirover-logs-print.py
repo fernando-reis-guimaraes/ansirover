@@ -57,6 +57,16 @@ def validate_simple_name(label, value):
         fail(f"{label} must not contain whitespace: {value}")
 
 
+def validate_caprover_machine_name(machine_name):
+    validate_simple_name("machine name", machine_name)
+
+    if "@" in machine_name:
+        fail(
+            "CapRover machine name must not contain @; "
+            "AnsiRover reserves @ for explicit SSH targets in user@host form"
+        )
+
+
 def load_caprover_config():
     if not CONFIG_PATH.exists():
         fail(f"CapRover CLI config not found: {CONFIG_PATH}")
@@ -187,7 +197,7 @@ def parse_args(argv):
         )
     )
 
-    parser.add_argument("machine_name", help="CapRover CLI server/machine name, e.g. server-a")
+    parser.add_argument("machine_name", help="CapRover CLI server/machine name, e.g. server-a; @ is not allowed")
     parser.add_argument("app_name", help="CapRover app name")
     parser.add_argument(
         "-f",
@@ -202,7 +212,7 @@ def parse_args(argv):
 def main():
     args = parse_args(sys.argv[1:])
 
-    validate_simple_name("machine name", args.machine_name)
+    validate_caprover_machine_name(args.machine_name)
     validate_simple_name("app name", args.app_name)
 
     service_name = normalize_service_name(args.app_name)

@@ -58,6 +58,16 @@ def validate_simple_name(label, value):
         fail(f"{label} must not contain whitespace: {value}")
 
 
+def validate_caprover_machine_name(server_name):
+    validate_simple_name("server name", server_name)
+
+    if "@" in server_name:
+        fail(
+            "CapRover machine name must not contain @; "
+            "AnsiRover reserves @ for explicit SSH targets in user@host form"
+        )
+
+
 def resolve_app_dir(current_dir, app_name, path_value):
     if path_value:
         return Path(path_value).expanduser().resolve()
@@ -589,7 +599,7 @@ def parse_args():
         )
     )
 
-    parser.add_argument("server_name", help="CapRover CLI server name, e.g. frginbox or storage")
+    parser.add_argument("server_name", help="CapRover CLI machine name, e.g. frginbox or storage; @ is not allowed")
     parser.add_argument("app_name", help="CapRover app name to delete")
     parser.add_argument(
         "path",
@@ -611,7 +621,7 @@ def parse_args():
 def main():
     args = parse_args()
 
-    validate_simple_name("server name", args.server_name)
+    validate_caprover_machine_name(args.server_name)
     validate_simple_name("app name", args.app_name)
 
     current_dir = Path.cwd()

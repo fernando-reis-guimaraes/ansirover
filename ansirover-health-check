@@ -1,2 +1,2 @@
-# shellcheck shell=bash
-exec python3 "$HOME/bin/.packages/ansirover/ansirover-machine-target-exec.py" "ansirover-health-check.py" "$@"
+#!/bin/sh
+exec "$HOME/bin/.packages/ansirover/ansirover-health-check.py" "$@"
