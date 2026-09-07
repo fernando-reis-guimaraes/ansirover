@@ -35,7 +35,7 @@ The deprecated `caprover-ansirover-*` wrappers live in the consumer repository, 
 ## CLI rules
 
 - Run with no arguments: print usage and exit; never perform work or enter interactive mode.
-- Named arguments use the single-token `--name=value` form.
+- Named arguments use the single-token `--name=value` form when practical; preserve existing public signatures when compatibility matters.
 - Implementations print timestamps and `[plan]`/`[config]`/`[check]` diagnostics to stderr; stdout carries results and command output where streaming subprocesses require it.
 - Agent-facing commands must fail rather than prompt. Git publication must disable terminal/credential-manager prompts and use SSH batch mode when the caller has not supplied its own `GIT_SSH_COMMAND`.
 
@@ -44,30 +44,48 @@ The deprecated `caprover-ansirover-*` wrappers live in the consumer repository, 
 For `ansirover-compose-build-push` and deployment automation, preserve these invariants:
 
 ```text
-1 Git repository = 1 deployable app
-1 top-level ansirover/ = 1 app inventory
-1 ansirover/compose.yaml = 1 service
+1 selected AnsiRover environment = 1 deployable app inventory
+1 compose.yaml = 1 service
 1 service = 1 image
 ```
 
-- Monorepos are not supported.
-- Multiple independently deployable apps under one parent project must be separate Git repositories, normally attached as Git submodules.
-- Do not add per-app subdirectories below an application's `ansirover/`; keep the inventory flat.
-- `ansirover/compose.yaml` must define exactly one buildable service.
-- The matching inventory file is `ansirover/<service-name>.yaml`.
+- The positional path passed to `ansirover-compose-build-push` must be exactly the application Git top-level. Do not accept arbitrary subdirectories and infer upward from them.
+- The default deployment environment is the top-level `ansirover/` path.
+- Named environments use top-level `ansirover.<name>/` paths. Environment names are user-defined; do not assign special semantics to `production`, `staging`, `local`, or similar names.
+- The default `ansirover/` path may be a symlink to a named `ansirover.<name>/` path inside the application Git root.
+- A selected AnsiRover environment may belong to the application repository or be its own Git submodule.
+- Keep each selected AnsiRover environment flat; do not add per-app subdirectories below it.
+- `compose.yaml` is the canonical image build/publication definition.
+- `DEPLOY.md` is complementary deployment intent and architectural context. If it existed before a bootstrap, treat it as user-owned and do not rewrite it automatically. If the template generator created it during the current bootstrap, an agent should adapt it to the actual repository before bootstrap is complete.
+- `README.md` is a short human-facing index and file-responsibility table suitable for GitHub rendering.
+- Do not infer deployment units from source directories, package-manager workspaces, or package names. Infer from production build/runtime boundaries.
+- Source-level monorepo/workspace layouts are valid when their production build converges to one image/service.
+- If multiple independent deployment units exist and no aggregate deployment is declared, explain the ambiguity rather than inventing an architecture. A Git superproject with one application repository per submodule is a recommended clean option, not a mandatory solution.
+- A container aggregator or Docker-in-Docker approach is technically possible but must not be selected automatically; it is generally unsuitable for production and may only be reasonable for short-lived testing/staging scenarios.
+- `compose.yaml` must define exactly one buildable service. The matching inventory file is `<selected-environment>/<service-name>.yaml`.
+- The Dockerfile location does not define `build.context`; inspect what the build actually needs.
 - Derive `IMAGE_TAG` from the short `HEAD` of the Git repository that owns the resolved `build.context`, not from the repository that stores the AnsiRover inventory.
-- The source Git repository must be clean before image publication. Exclude only `ansirover/` changes that cannot enter the Docker build context.
-- When `ansirover/` is inside `build.context`, the effective Docker ignore file must explicitly exclude its relative path. Dockerfile-specific ignore files take precedence over root `.dockerignore` files.
-- Place the required AnsiRover exclusion after all Docker-ignore negation rules so later exceptions cannot re-include it.
-- The application `ansirover/` directory may itself be a Git submodule; build identity must remain based on `build.context`.
+- The source Git repository must be clean before image publication.
+- Discover all top-level `ansirover` and `ansirover.*` paths inside `build.context` and require the effective Docker ignore file to exclude each one. Dockerfile-specific ignore files take precedence over root `.dockerignore` files.
+- Place every required AnsiRover exclusion after all Docker-ignore negation rules so later exceptions cannot re-include deployment metadata.
 - A remote `build.context` is invalid because the CLI must resolve a local source Git repository.
 - After a successful image push, update `<service>.yaml` `deployedImageName` to the exact immutable image reference.
-- Commit only the AnsiRover allowlist: `compose.yaml`, the app inventory, known app sidecars, and the actual Dockerfile/effective Dockerfile-specific ignore file when they live inside `ansirover/`.
-- Do not automatically add unknown extra files from `ansirover/`.
-- Push the AnsiRover repository after its allowlisted commit.
-- If `ansirover/` is a Git submodule, commit only its gitlink in the application repository and push that repository after the AnsiRover push succeeds.
+- Commit only the AnsiRover allowlist: `compose.yaml`, `README.md`, `DEPLOY.md`, the app inventory, known app sidecars, and the actual Dockerfile/effective Dockerfile-specific ignore file when they live inside the selected environment.
+- Do not automatically add unknown extra files from an AnsiRover environment.
+- Push the selected AnsiRover repository after its allowlisted commit.
+- If the selected environment is a Git submodule, commit only its resolved gitlink in the application repository and push that repository after the AnsiRover push succeeds.
 - Never force-push from `ansirover-compose-build-push`.
 - Keep CapRover deployment separate: image/Git publication uses `ansirover-compose-build-push`; applying inventory uses `ansirover-restore-upload`.
+
+## External service boundary
+
+Provider-managed services are prerequisites, not AnsiRover-owned infrastructure.
+
+- Inspect runtime configuration to identify required PostgreSQL, S3-compatible storage, SMTP, or other external dependencies.
+- Do not provision provider-specific infrastructure inside the AnsiRover deployment workflow.
+- Use provider-specific tooling/skills when available, then place resulting connection/configuration values in the selected AnsiRover environment inventory.
+- AnsiRover may validate required configuration or runtime connectivity, but service creation and lifecycle remain owned by the provider-specific workflow.
+- Never put provider credentials or secrets in `DEPLOY.md` or `README.md`.
 
 ## Target grammar and machine resolution
 
@@ -108,12 +126,15 @@ User-visible or safety-sensitive behavior changes require focused regression cov
 For `ansirover-compose-build-push`, regression tests must cover:
 
 - no-argument usage-only behavior;
+- exact application Git top-level enforcement;
+- default and named environment selection;
+- default `ansirover/` symlink handling;
 - the single-service invariant;
 - source Git identity derived from `build.context`;
-- hard clean-state enforcement with AnsiRover exclusion;
-- Docker-ignore enforcement and Dockerfile-specific precedence;
+- hard clean-state enforcement with all AnsiRover environment paths excluded;
+- Docker-ignore enforcement for all `ansirover`/`ansirover.*` paths and Dockerfile-specific precedence;
 - inventory update behavior;
-- allowlisted commits that leave unknown files out;
+- allowlisted commits including `README.md`/`DEPLOY.md` while leaving unknown files out;
 - non-interactive Git publication settings;
 - AnsiRover submodule layout handling.
 
