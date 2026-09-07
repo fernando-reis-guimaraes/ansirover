@@ -11,7 +11,10 @@ from datetime import datetime
 from pathlib import Path
 
 ANSIROVER_DIR_NAME = "ansirover"
+ANSIROVER_DIR_PREFIX = "ansirover."
 COMPOSE_FILE_NAME = "compose.yaml"
+README_FILE_NAME = "README.md"
+DEPLOY_FILE_NAME = "DEPLOY.md"
 REGISTRY_PREFIX = "cr.umapps.net/umapps/"
 DISCOVERY_IMAGE_TAG = "ansirover-discovery"
 SIDECAR_SUFFIXES = (
@@ -87,32 +90,63 @@ def relative_path(parent, child):
         return None
 
 
-def resolve_layout(input_path):
-    candidate = Path(input_path).expanduser().resolve()
-    if not candidate.is_dir():
-        fail(f"path is not a directory: {candidate}")
+def validate_environment_name(environment_name):
+    if environment_name is None:
+        return
+    if not environment_name:
+        fail("environment name must not be empty")
+    if "\x00" in environment_name:
+        fail("environment name must not contain NUL byte")
+    if "/" in environment_name or "\\" in environment_name:
+        fail(f"environment name must not contain path separators: {environment_name}")
+    if environment_name in {".", ".."}:
+        fail(f"environment name must not be {environment_name}")
+    if any(character.isspace() for character in environment_name):
+        fail(f"environment name must not contain whitespace: {environment_name}")
 
-    if candidate.name == ANSIROVER_DIR_NAME and (candidate / COMPOSE_FILE_NAME).is_file():
-        application_root = candidate.parent
-        application_git_root = git_root(application_root, "application")
-        if application_git_root != application_root:
-            fail(f"the parent of ansirover/ must be the application Git root: {application_root}")
-        return application_root, application_git_root, candidate, candidate / COMPOSE_FILE_NAME
 
-    candidate_git_root = git_root(candidate, "application")
-    ansirover_dir = candidate_git_root / ANSIROVER_DIR_NAME
+def environment_directory_name(environment_name):
+    if environment_name is None:
+        return ANSIROVER_DIR_NAME
+    return ANSIROVER_DIR_PREFIX + environment_name
+
+
+def resolve_layout(input_path, environment_name=None):
+    validate_environment_name(environment_name)
+    application_root = Path(input_path).expanduser().resolve()
+    if not application_root.is_dir():
+        fail(f"path is not a directory: {application_root}")
+
+    application_git_root = git_root(application_root, "application")
+    if application_git_root != application_root:
+        fail(
+            "path must be exactly the application Git root; resolved Git root is: "
+            + str(application_git_root)
+        )
+
+    ansirover_dir = application_root / environment_directory_name(environment_name)
+    if not ansirover_dir.is_dir():
+        fail(f"AnsiRover environment directory does not exist: {ansirover_dir}")
+
+    resolved_ansirover_dir = ansirover_dir.resolve()
+    if relative_path(application_root, resolved_ansirover_dir) is None:
+        fail(f"AnsiRover environment must resolve inside the application Git root: {ansirover_dir}")
+
     compose_path = ansirover_dir / COMPOSE_FILE_NAME
-    if compose_path.is_file():
-        return candidate_git_root, candidate_git_root, ansirover_dir, compose_path
+    if not compose_path.is_file():
+        fail(f"expected AnsiRover Compose file: {compose_path}")
 
-    if candidate_git_root.name == ANSIROVER_DIR_NAME and (candidate_git_root / COMPOSE_FILE_NAME).is_file():
-        application_root = candidate_git_root.parent
-        application_git_root = git_root(application_root, "application")
-        if application_git_root != application_root:
-            fail(f"the parent of the ansirover submodule must be the application Git root: {application_root}")
-        return application_root, application_git_root, candidate_git_root, candidate_git_root / COMPOSE_FILE_NAME
+    return application_root, application_git_root, ansirover_dir, compose_path
 
-    fail(f"expected <application-git-root>/{ANSIROVER_DIR_NAME}/{COMPOSE_FILE_NAME}")
+
+def deployment_paths(application_root):
+    paths = []
+    for child in application_root.iterdir():
+        if child.name != ANSIROVER_DIR_NAME and not child.name.startswith(ANSIROVER_DIR_PREFIX):
+            continue
+        if child.is_dir() or child.is_symlink():
+            paths.append(child)
+    return sorted(paths, key=lambda path: path.name)
 
 
 def require_flat_ansirover(ansirover_dir):
@@ -122,7 +156,7 @@ def require_flat_ansirover(ansirover_dir):
         if child.is_dir() and not child.name.startswith(".")
     )
     if nested:
-        fail("ansirover/ must be flat; subdirectories are not supported: " + ", ".join(nested))
+        fail("AnsiRover environment directory must be flat; subdirectories are not supported: " + ", ".join(nested))
 
 
 def compose_model(ansirover_dir, compose_path, image_tag):
@@ -147,7 +181,7 @@ def compose_model(ansirover_dir, compose_path, image_tag):
 def single_service(model):
     services = model.get("services")
     if not isinstance(services, dict) or len(services) != 1:
-        fail("ansirover/compose.yaml must define exactly one service")
+        fail("AnsiRover compose.yaml must define exactly one service")
     service_name = next(iter(services))
     definition = services[service_name]
     if not isinstance(definition, dict) or definition.get("build") in (None, False):
@@ -197,24 +231,45 @@ def normalized_ignore_rule(line):
     return value.replace("\\", "/").strip("/")
 
 
-def fail_dockerignore_exclusion(message, ignore_path, required_rule, ansirover_dir):
+def required_ansirover_ignore_rules(context, application_root):
+    required_rules = []
+    for path in deployment_paths(application_root):
+        resolved_path = path.resolve()
+        if resolved_path == context or relative_path(resolved_path, context) is not None:
+            fail(f"AnsiRover deployment directory cannot contain build.context: {path}")
+        relative = relative_path(context, path)
+        if relative is None:
+            continue
+        normalized = relative.as_posix().strip("/")
+        if normalized and normalized not in required_rules:
+            required_rules.append(normalized)
+    return required_rules
+
+
+def fail_dockerignore_exclusion(
+    message,
+    ignore_path,
+    remediation_rules,
+    application_root,
+    environment_name,
+):
     ignore_repository = git_root(ignore_path.parent, "Docker ignore")
     relative_ignore = relative_path(ignore_repository, ignore_path)
     if relative_ignore is None:
         fail(f"Docker ignore file is outside its Git repository: {ignore_path}")
 
-    quoted_rule = shlex.quote(required_rule + "/")
+    quoted_rules = " ".join(shlex.quote(rule + "/") for rule in remediation_rules)
     quoted_ignore_path = shlex.quote(str(ignore_path))
     quoted_repository = shlex.quote(str(ignore_repository))
     quoted_relative_ignore = shlex.quote(relative_ignore.as_posix())
     quoted_commit_message = shlex.quote("chore: exclude ansirover from Docker context")
-    quoted_application_root = shlex.quote(str(ansirover_dir.parent))
+    quoted_application_root = shlex.quote(str(application_root))
 
     print(f"ERROR: {message}", file=sys.stderr)
     print("", file=sys.stderr)
     print("Fix and continue with:", file=sys.stderr)
     print(
-        f"  printf '\\n%s\\n' {quoted_rule} >> {quoted_ignore_path}",
+        f"  printf '\\n%s\\n' {quoted_rules} >> {quoted_ignore_path}",
         file=sys.stderr,
     )
     print(
@@ -226,77 +281,80 @@ def fail_dockerignore_exclusion(message, ignore_path, required_rule, ansirover_d
         f"{quoted_relative_ignore}",
         file=sys.stderr,
     )
-    print(
-        f"  git -C {quoted_repository} push origin HEAD",
-        file=sys.stderr,
-    )
-    print(
-        f"  ansirover-compose-build-push {quoted_application_root}",
-        file=sys.stderr,
-    )
+    print(f"  git -C {quoted_repository} push origin HEAD", file=sys.stderr)
+    rerun = f"  ansirover-compose-build-push {quoted_application_root}"
+    if environment_name is not None:
+        rerun += " --environment " + shlex.quote(environment_name)
+    print(rerun, file=sys.stderr)
     raise SystemExit(1)
 
 
-def validate_dockerignore(context, ansirover_dir, service_name, definition):
-    relative_ansirover = relative_path(context, ansirover_dir)
-    if relative_ansirover is None:
+def validate_dockerignore(context, application_root, service_name, definition, environment_name=None):
+    required_rules = required_ansirover_ignore_rules(context, application_root)
+    if not required_rules:
         return None
-    if str(relative_ansirover) == ".":
-        fail("ansirover/ cannot itself be build.context")
 
-    required_rule = relative_ansirover.as_posix().strip("/")
     dockerfile = dockerfile_path(context, service_name, definition)
     ignore_path = context / ".dockerignore"
     if dockerfile is not None:
         specific = dockerfile.with_name(dockerfile.name + ".dockerignore")
         if specific.is_file():
             ignore_path = specific
+
     if not ignore_path.is_file():
         fail_dockerignore_exclusion(
             f"effective Docker ignore file does not exist: {ignore_path}",
             ignore_path,
-            required_rule,
-            ansirover_dir,
+            required_rules,
+            application_root,
+            environment_name,
         )
 
-    required_index = None
-    negation_indexes = []
+    required_indexes = {rule: None for rule in required_rules}
+    last_negation_index = -1
     for index, line in enumerate(ignore_path.read_text(encoding="utf-8").splitlines()):
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
-        is_negation = stripped.startswith("!")
-        rule = stripped
-        if is_negation:
-            rule = stripped[1:]
-        if is_negation:
-            negation_indexes.append(index)
-        if not is_negation and normalized_ignore_rule(rule) == required_rule:
-            required_index = index
-    if required_index is None:
+        if stripped.startswith("!"):
+            last_negation_index = index
+            continue
+        normalized = normalized_ignore_rule(stripped)
+        if normalized in required_indexes:
+            required_indexes[normalized] = index
+
+    remediation_rules = []
+    for rule, rule_index in required_indexes.items():
+        if rule_index is None or rule_index <= last_negation_index:
+            remediation_rules.append(rule)
+
+    if remediation_rules:
+        readable_rules = ", ".join(rule + "/" for rule in remediation_rules)
         fail_dockerignore_exclusion(
-            f"{ignore_path} must explicitly exclude {required_rule}/",
+            f"{ignore_path} must exclude these AnsiRover paths after all negation rules: {readable_rules}",
             ignore_path,
-            required_rule,
-            ansirover_dir,
-        )
-    if any(index > required_index for index in negation_indexes):
-        fail_dockerignore_exclusion(
-            f"move the {required_rule}/ exclusion after all negation rules in {ignore_path}",
-            ignore_path,
-            required_rule,
-            ansirover_dir,
+            remediation_rules,
+            application_root,
+            environment_name,
         )
     return ignore_path
 
 
-def require_clean_source(source_git_root, ansirover_dir):
+def require_clean_source(source_git_root, application_root):
     command = [
-        "git", "-C", str(source_git_root), "status", "--porcelain", "--untracked-files=all", "--", "."
+        "git",
+        "-C",
+        str(source_git_root),
+        "status",
+        "--porcelain",
+        "--untracked-files=all",
+        "--",
+        ".",
     ]
-    relative_ansirover = relative_path(source_git_root, ansirover_dir)
-    if relative_ansirover is not None:
-        command.append(f":(exclude){relative_ansirover.as_posix().strip('/')}")
+    for path in deployment_paths(application_root):
+        relative = relative_path(source_git_root, path)
+        if relative is not None:
+            command.append(f":(exclude){relative.as_posix().strip('/')}")
     completed = run(command, cwd=source_git_root, capture=True, label="git")
     if completed.stdout.strip():
         print(completed.stdout, file=sys.stderr, end="")
@@ -343,12 +401,20 @@ def inventory_with_image(path, image_reference):
 
 def allowlisted_paths(ansirover_dir, service_name, actual_dockerfile, effective_ignore):
     paths = [ansirover_dir / COMPOSE_FILE_NAME, ansirover_dir / f"{service_name}.yaml"]
+    for file_name in (README_FILE_NAME, DEPLOY_FILE_NAME):
+        path = ansirover_dir / file_name
+        if path.is_file():
+            paths.append(path)
     for suffix in SIDECAR_SUFFIXES:
         path = ansirover_dir / f"{service_name}{suffix}"
         if path.is_file():
             paths.append(path)
     for path in (actual_dockerfile, effective_ignore):
-        if path is not None and path.is_file() and relative_path(ansirover_dir, path) is not None and path not in paths:
+        if path is None or not path.is_file():
+            continue
+        if relative_path(ansirover_dir.resolve(), path.resolve()) is None:
+            continue
+        if path not in paths:
             paths.append(path)
     return paths
 
@@ -411,23 +477,26 @@ def build_and_push(ansirover_dir, compose_path, tag):
 
 def print_usage():
     print("""Usage:
-  ansirover-compose-build-push <path> [--dry-run]
+  ansirover-compose-build-push <application-git-root> [--environment <name>] [--dry-run]
 
 Contract:
-  one Git repository = one deployable app
-  one ansirover/ = one app inventory
+  the positional path must be exactly the application Git top-level
+  one selected AnsiRover environment = one app inventory
   one compose.yaml = one service = one image
-  source Git repository must be clean
-  ansirover/ must be excluded from build.context
+  build.context must belong to a Git repository
+  that source Git repository must be clean
+  all ansirover/ and ansirover.* paths inside build.context must be excluded
 
-Behavior:
-  Builds and pushes the image, updates <service>.yaml deployedImageName,
-  commits/pushes only known AnsiRover files, and updates/pushes the parent
-  gitlink when ansirover/ is a submodule. Never prompts for input.
+Environment selection:
+  no --environment       use <application-git-root>/ansirover
+  --environment staging  use <application-git-root>/ansirover.staging
+
+The default ansirover path may be a symlink to another ansirover.<name>
+directory inside the application Git root.
 
 Examples:
   ansirover-compose-build-push .
-  ansirover-compose-build-push ./ansirover
+  ansirover-compose-build-push . --environment production
   ansirover-compose-build-push . --dry-run
 """)
 
@@ -435,6 +504,7 @@ Examples:
 def parse_args(arguments):
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("path")
+    parser.add_argument("--environment")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(arguments)
 
@@ -448,14 +518,20 @@ def main(arguments=None):
         return 0
 
     args = parse_args(raw_arguments)
-    application_root, application_git_root, ansirover_dir, compose_path = resolve_layout(args.path)
+    application_root, application_git_root, ansirover_dir, compose_path = resolve_layout(
+        args.path,
+        args.environment,
+    )
     require_flat_ansirover(ansirover_dir)
+
+    resolved_ansirover_dir = ansirover_dir.resolve()
     ansirover_git_root = git_root(ansirover_dir, "AnsiRover")
-    if ansirover_git_root not in (application_git_root, ansirover_dir):
-        fail("ansirover/ must belong to the application repo or be its own submodule repo")
+    if ansirover_git_root not in (application_git_root, resolved_ansirover_dir):
+        fail("selected AnsiRover environment must belong to the application repo or be its own submodule repo")
 
     ansirover_branch, ansirover_origin = publication_target(ansirover_git_root)
-    application_branch, application_origin = ansirover_branch, ansirover_origin
+    application_branch = ansirover_branch
+    application_origin = ansirover_origin
     if ansirover_git_root != application_git_root:
         application_branch, application_origin = publication_target(application_git_root)
 
@@ -464,8 +540,14 @@ def main(arguments=None):
     app_inventory = inventory_path(ansirover_dir, service_name)
     context = build_context(ansirover_dir, service_name, discovery_definition)
     source_git_root = git_root(context, "build.context source")
-    discovery_ignore = validate_dockerignore(context, ansirover_dir, service_name, discovery_definition)
-    require_clean_source(source_git_root, ansirover_dir)
+    discovery_ignore = validate_dockerignore(
+        context,
+        application_root,
+        service_name,
+        discovery_definition,
+        args.environment,
+    )
+    require_clean_source(source_git_root, application_root)
     tag = image_tag(source_git_root)
 
     resolved = compose_model(ansirover_dir, compose_path, tag)
@@ -475,13 +557,23 @@ def main(arguments=None):
     resolved_context = build_context(ansirover_dir, service_name, definition)
     if resolved_context != context:
         fail("build.context must not depend on IMAGE_TAG")
-    effective_ignore = validate_dockerignore(context, ansirover_dir, service_name, definition)
+    effective_ignore = validate_dockerignore(
+        context,
+        application_root,
+        service_name,
+        definition,
+        args.environment,
+    )
     if effective_ignore != discovery_ignore:
         fail("effective Docker ignore file must not depend on IMAGE_TAG")
     actual_dockerfile = dockerfile_path(context, service_name, definition)
     image_reference = validate_image(service_name, definition, tag)
     inventory_with_image(app_inventory, image_reference)
 
+    environment_label = "default"
+    if args.environment is not None:
+        environment_label = args.environment
+    info(f"[plan] environment: {environment_label}")
     info(f"[plan] service: {service_name}")
     info(f"[plan] source Git root: {source_git_root}")
     info(f"[plan] IMAGE_TAG: {tag}")
@@ -502,11 +594,13 @@ def main(arguments=None):
         if ansirover_git_root != application_git_root:
             gitlink_committed = commit_paths(
                 application_git_root,
-                [ansirover_dir],
+                [resolved_ansirover_dir],
                 f"chore: update ansirover for {service_name} {tag}",
             )
             push_branch(application_git_root, application_branch)
 
+    print("ENVIRONMENT=" + environment_label)
+    print("ANSIROVER_DIR=" + str(ansirover_dir))
     print("IMAGE_TAG=" + tag)
     print("IMAGE=" + image_reference)
     print("SOURCE_GIT_ROOT=" + str(source_git_root))

@@ -40,6 +40,53 @@ class BuildPushTests(unittest.TestCase):
         self.assertIn("Usage:", stdout.getvalue())
         run_command.assert_not_called()
 
+    def test_input_path_must_be_exact_git_top_level(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = Path(directory) / "app"
+            nested = app / "backend"
+            ansirover = app / "ansirover"
+            nested.mkdir(parents=True)
+            ansirover.mkdir()
+            (ansirover / "compose.yaml").write_text("services: {}\n", encoding="utf-8")
+            init_repo(app)
+
+            with self.assertRaises(SystemExit):
+                MODULE.resolve_layout(nested)
+
+            resolved = MODULE.resolve_layout(app)
+            self.assertEqual(resolved[0], app.resolve())
+            self.assertEqual(resolved[2], ansirover.resolve())
+
+    def test_named_environment_is_selected_from_git_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = Path(directory) / "app"
+            ansirover = app / "ansirover.production"
+            ansirover.mkdir(parents=True)
+            (ansirover / "compose.yaml").write_text("services: {}\n", encoding="utf-8")
+            init_repo(app)
+
+            resolved = MODULE.resolve_layout(app, "production")
+            self.assertEqual(resolved[2], ansirover.resolve())
+
+    def test_default_ansirover_may_be_symlink_to_named_environment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = Path(directory) / "app"
+            target = app / "ansirover.staging"
+            target.mkdir(parents=True)
+            (target / "compose.yaml").write_text("services: {}\n", encoding="utf-8")
+            (app / "ansirover").symlink_to("ansirover.staging", target_is_directory=True)
+            init_repo(app)
+
+            resolved = MODULE.resolve_layout(app)
+            self.assertEqual(resolved[2], app / "ansirover")
+            self.assertEqual(resolved[2].resolve(), target.resolve())
+
+    def test_environment_name_cannot_escape_application_root(self):
+        for invalid_name in ["../production", "production/test", "production test", ".."]:
+            with self.subTest(invalid_name=invalid_name):
+                with self.assertRaises(SystemExit):
+                    MODULE.validate_environment_name(invalid_name)
+
     def test_one_compose_means_one_service(self):
         with self.assertRaises(SystemExit):
             MODULE.single_service({"services": {"a": {"build": "."}, "b": {"build": "."}}})
@@ -51,30 +98,39 @@ class BuildPushTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 MODULE.require_flat_ansirover(ansirover)
 
-    def test_dockerignore_is_required_and_must_follow_negations(self):
+    def test_dockerignore_requires_every_ansirover_environment_after_negations(self):
         with tempfile.TemporaryDirectory() as directory:
             app = Path(directory)
-            ansirover = app / "ansirover"
-            ansirover.mkdir()
+            (app / "ansirover").mkdir()
+            (app / "ansirover.production").mkdir()
             init_repo(app)
             definition = {"build": {"context": ".."}}
+
             with self.assertRaises(SystemExit):
-                MODULE.validate_dockerignore(app, ansirover, "app", definition)
+                MODULE.validate_dockerignore(app, app, "app", definition)
+
             ignore = app / ".dockerignore"
-            ignore.write_text("ansirover/\n!**/*.md\n", encoding="utf-8")
+            ignore.write_text(
+                "ansirover/\nansirover.production/\n!**/*.md\n",
+                encoding="utf-8",
+            )
             with self.assertRaises(SystemExit):
-                MODULE.validate_dockerignore(app, ansirover, "app", definition)
-            ignore.write_text("!**/*.md\nansirover/\n", encoding="utf-8")
+                MODULE.validate_dockerignore(app, app, "app", definition)
+
+            ignore.write_text(
+                "!**/*.md\nansirover/\nansirover.production/\n",
+                encoding="utf-8",
+            )
             self.assertEqual(
-                MODULE.validate_dockerignore(app, ansirover, "app", definition),
+                MODULE.validate_dockerignore(app, app, "app", definition),
                 ignore,
             )
 
     def test_missing_dockerignore_rule_prints_safe_fix_commands(self):
         with tempfile.TemporaryDirectory() as directory:
             app = Path(directory) / "app"
-            ansirover = app / "ansirover"
-            ansirover.mkdir(parents=True)
+            (app / "ansirover").mkdir(parents=True)
+            (app / "ansirover.production").mkdir()
             init_repo(app)
             ignore = app / ".dockerignore"
             ignore.write_text("node_modules", encoding="utf-8")
@@ -83,25 +139,34 @@ class BuildPushTests(unittest.TestCase):
 
             with contextlib.redirect_stderr(stderr):
                 with self.assertRaises(SystemExit):
-                    MODULE.validate_dockerignore(app, ansirover, "app", definition)
+                    MODULE.validate_dockerignore(
+                        app,
+                        app,
+                        "app",
+                        definition,
+                        "production",
+                    )
 
             output = stderr.getvalue()
             self.assertIn("Fix and continue with:", output)
-            self.assertIn("printf '\\n%s\\n' ansirover/ >>", output)
+            self.assertIn("ansirover/", output)
+            self.assertIn("ansirover.production/", output)
             self.assertIn(f"git -C {app} add -- .dockerignore", output)
             self.assertIn(
                 "commit --only -m 'chore: exclude ansirover from Docker context' -- .dockerignore",
                 output,
             )
             self.assertIn(f"git -C {app} push origin HEAD", output)
-            self.assertIn(f"ansirover-compose-build-push {app}", output)
+            self.assertIn(
+                f"ansirover-compose-build-push {app} --environment production",
+                output,
+            )
 
     def test_dockerfile_specific_ignore_takes_precedence(self):
         with tempfile.TemporaryDirectory() as directory:
             app = Path(directory)
-            ansirover = app / "ansirover"
+            (app / "ansirover").mkdir()
             docker_dir = app / "docker"
-            ansirover.mkdir()
             docker_dir.mkdir()
             init_repo(app)
             (app / ".dockerignore").write_text("ansirover/\n", encoding="utf-8")
@@ -111,25 +176,29 @@ class BuildPushTests(unittest.TestCase):
             specific.write_text("node_modules/\n", encoding="utf-8")
             definition = {"build": {"context": "..", "dockerfile": "docker/build.Dockerfile"}}
             with self.assertRaises(SystemExit):
-                MODULE.validate_dockerignore(app, ansirover, "app", definition)
+                MODULE.validate_dockerignore(app, app, "app", definition)
             specific.write_text("ansirover/\n", encoding="utf-8")
-            self.assertEqual(MODULE.validate_dockerignore(app, ansirover, "app", definition), specific)
+            self.assertEqual(MODULE.validate_dockerignore(app, app, "app", definition), specific)
 
-    def test_source_clean_check_ignores_ansirover_only(self):
+    def test_source_clean_check_ignores_all_ansirover_environment_paths(self):
         with tempfile.TemporaryDirectory() as directory:
             app = Path(directory) / "app"
             ansirover = app / "ansirover"
+            production = app / "ansirover.production"
             ansirover.mkdir(parents=True)
+            production.mkdir()
             (app / "app.txt").write_text("clean\n", encoding="utf-8")
             (ansirover / "compose.yaml").write_text("clean\n", encoding="utf-8")
+            (production / "compose.yaml").write_text("clean\n", encoding="utf-8")
             init_repo(app)
             git(app, "add", ".")
             git(app, "commit", "-qm", "initial")
             (ansirover / "compose.yaml").write_text("dirty\n", encoding="utf-8")
-            MODULE.require_clean_source(app, ansirover)
+            (production / "compose.yaml").write_text("dirty\n", encoding="utf-8")
+            MODULE.require_clean_source(app, app)
             (app / "app.txt").write_text("dirty\n", encoding="utf-8")
             with self.assertRaises(SystemExit):
-                MODULE.require_clean_source(app, ansirover)
+                MODULE.require_clean_source(app, app)
 
     def test_inventory_update(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -138,21 +207,25 @@ class BuildPushTests(unittest.TestCase):
             updated = MODULE.inventory_with_image(inventory, "cr.umapps.net/umapps/app:abc1234")
             self.assertIn("deployedImageName: cr.umapps.net/umapps/app:abc1234", updated)
 
-    def test_allowlist_leaves_unknown_file_out(self):
+    def test_allowlist_includes_readme_and_deploy_but_leaves_unknown_file_out(self):
         with tempfile.TemporaryDirectory() as directory:
             ansirover = Path(directory) / "ansirover"
             ansirover.mkdir()
             compose = ansirover / "compose.yaml"
             inventory = ansirover / "app.yaml"
+            readme = ansirover / "README.md"
+            deploy = ansirover / "DEPLOY.md"
             sidecar = ansirover / "app.env-vars.env"
             dockerfile = ansirover / "Build.Dockerfile"
             specific_ignore = ansirover / "Build.Dockerfile.dockerignore"
             unknown = ansirover / "notes.tmp"
-            for path in [compose, inventory, sidecar, dockerfile, specific_ignore, unknown]:
+            for path in [compose, inventory, readme, deploy, sidecar, dockerfile, specific_ignore, unknown]:
                 path.write_text("x\n", encoding="utf-8")
             paths = MODULE.allowlisted_paths(ansirover, "app", dockerfile, specific_ignore)
             self.assertIn(compose, paths)
             self.assertIn(inventory, paths)
+            self.assertIn(readme, paths)
+            self.assertIn(deploy, paths)
             self.assertIn(sidecar, paths)
             self.assertIn(dockerfile, paths)
             self.assertIn(specific_ignore, paths)
