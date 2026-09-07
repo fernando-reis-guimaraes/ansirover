@@ -19,16 +19,25 @@ ansirover-restore-upload.py       implementation (#!/usr/bin/env python3)
 ansirover-restore-upload.md       sidecar documentation
 ```
 
-`caprover_ansirover_policy.py` is a shared module imported by the implementations. It is not a CLI and has no shim.
+`caprover_ansirover_policy.py` is a shared module imported by implementations. `ansirover-machine-target-exec.py` is the shared public-entry target grammar runner for server-target commands. Neither is a user-facing CLI and neither has an extensionless shim.
 
-The `~/bin` consumer exposes command names as symlinks pointing at these shims. Shims follow the consumer's two-line base-shim convention and exec the same-basename implementation file at the consumer's submodule checkout path:
+The `~/bin` consumer exposes command names as symlinks pointing at these shims. Shims follow the consumer's two-line base-shim convention.
+
+Commands without a CapRover server target exec their same-basename implementation directly:
 
 ```bash
 # shellcheck shell=bash
-exec "$HOME/bin/.packages/ansirover/ansirover-restore-upload.py" "$@"
+exec "$HOME/bin/.packages/ansirover/ansirover-compose-build-push.py" "$@"
 ```
 
-The static path is intentional: it keeps the shim free of argument parsing, path resolution, and business logic, and executing the implementation through its real package path keeps `sys.path[0]` inside this repository so sibling imports such as `caprover_ansirover_policy` resolve.
+Commands whose first positional argument is a CapRover machine/URL target route through the shared target grammar runner, which validates the public target syntax and then execs the requested implementation through its real package path:
+
+```bash
+# shellcheck shell=bash
+exec python3 "$HOME/bin/.packages/ansirover/ansirover-machine-target-exec.py" "ansirover-restore-upload.py" "$@"
+```
+
+The static package path is intentional. Shims stay free of argument parsing, path resolution, and business logic; the shared runner owns only the cross-command target syntax gate. Executing implementations through their real package path keeps `sys.path[0]` inside this repository so sibling imports such as `caprover_ansirover_policy` resolve.
 
 The deprecated `caprover-ansirover-*` wrappers live in the consumer repository, not here.
 
@@ -76,6 +85,7 @@ These rules apply to `ansirover-*` commands. Do not impose this lookup behavior 
 - A bare server value such as `srv1` is always a CapRover machine name. Resolve it from `~/.config/configstore/caprover.json`.
 - Never fall back from a missing CapRover machine name to DNS, mDNS, Tailscale, `/etc/hosts`, or another hostname lookup. If `srv1` is both a valid hostname and a configured CapRover machine, the CapRover machine interpretation wins.
 - An AnsiRover CapRover machine name must not contain `@`. Reserve `@` for explicit SSH targets even if the upstream CapRover CLI would accept `@` in a machine name.
+- Public server-target shims route through `ansirover-machine-target-exec.py`, so the `@` reservation is enforced consistently before command-specific lookup or mutation starts.
 - A direct SSH target is valid only on commands/options that explicitly support one, such as `--ssh-target=user@host`.
 - An explicit SSH target must use `user@host` with exactly one `@` and non-empty user and host components. Bare hostnames such as `storage`, `10.0.0.5`, or `storage.example.com` are not explicit SSH targets.
 - A direct Captain URL is valid only on commands that explicitly support URL mode. It must use `http://` or `https://` and is distinct from both machine-name lookup and SSH addressing.
@@ -121,7 +131,8 @@ For target resolution, regression tests must cover:
 - bare CapRover machine names remain machine names and are resolved through CapRover config;
 - CapRover machine names containing `@` are rejected by AnsiRover;
 - explicit SSH targets require the exact `user@host` shape;
-- a missing machine name is never reinterpreted as a hostname.
+- a missing machine name is never reinterpreted as a hostname;
+- every public server-target shim routes through the shared target grammar runner.
 
 ## Safety
 
