@@ -21,6 +21,8 @@ caprover-app-definition-json-to-ansirover
 
 Each command ships as an extensionless executable shim plus an executable `*.py` implementation and, where useful, a `*.md` sidecar. Run any command without arguments to see its usage.
 
+Shims use `#!/bin/sh` so subprocess callers can execute them directly. A shellcheck directive alone does not select an interpreter and causes an `Exec format error` during backup conversion.
+
 ## Deployable application repository contract
 
 The build/publish workflow intentionally keeps application layout simple:
