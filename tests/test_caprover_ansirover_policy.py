@@ -25,6 +25,7 @@ class AnsiRoverPolicyTest(unittest.TestCase):
         self.assertEqual(duration_to_seconds("gracePeriod", "3m"), 180.0)
         self.assertEqual(duration_to_seconds("gracePeriod", "1h30m"), 5400.0)
         self.assertEqual(duration_to_seconds("postgresPollInterval", "500ms"), 0.5)
+        self.assertEqual(duration_to_seconds("swarmStabilityPeriod", "15s"), 15.0)
 
     def test_effective_policy_uses_defaults_without_materializing_them(self):
         explicit = {"restartDelay": "30m"}
@@ -34,11 +35,18 @@ class AnsiRoverPolicyTest(unittest.TestCase):
             get_effective_policy(explicit),
             {
                 "restartDelay": "30m",
+                "swarmStabilityPeriod": "15s",
                 "gracePeriod": "3m",
                 "postgresReconnectThreshold": 3,
                 "postgresPollInterval": "1s",
             },
         )
+
+    def test_swarm_stability_period_is_valid_explicit_policy(self):
+        explicit = {"swarmStabilityPeriod": "30s"}
+
+        self.assertEqual(validate_explicit_policy(explicit), explicit)
+        self.assertEqual(get_effective_policy(explicit)["swarmStabilityPeriod"], "30s")
 
     def test_metadata_round_trip_preserves_only_explicit_values(self):
         explicit = {
