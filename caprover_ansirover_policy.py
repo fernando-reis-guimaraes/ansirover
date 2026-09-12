@@ -15,6 +15,7 @@ END_MARKER = "# ANSIROVER-END #"
 
 POLICY_KEYS = (
     "restartDelay",
+    "swarmStabilityPeriod",
     "gracePeriod",
     "postgresReconnectThreshold",
     "postgresPollInterval",
@@ -22,6 +23,7 @@ POLICY_KEYS = (
 
 DEFAULT_POLICY = {
     "restartDelay": "1h",
+    "swarmStabilityPeriod": "15s",
     "gracePeriod": "3m",
     "postgresReconnectThreshold": 3,
     "postgresPollInterval": "1s",
