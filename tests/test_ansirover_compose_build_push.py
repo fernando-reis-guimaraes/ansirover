@@ -70,7 +70,7 @@ class BuildPushTests(unittest.TestCase):
 
     def test_default_ansirover_may_be_symlink_to_named_environment(self):
         with tempfile.TemporaryDirectory() as directory:
-            app = Path(directory) / "app"
+            app = (Path(directory) / "app").resolve()
             target = app / "ansirover.staging"
             target.mkdir(parents=True)
             (target / "compose.yaml").write_text("services: {}\n", encoding="utf-8")
@@ -128,7 +128,7 @@ class BuildPushTests(unittest.TestCase):
 
     def test_missing_dockerignore_rule_prints_safe_fix_commands(self):
         with tempfile.TemporaryDirectory() as directory:
-            app = Path(directory) / "app"
+            app = (Path(directory) / "app").resolve()
             (app / "ansirover").mkdir(parents=True)
             (app / "ansirover.production").mkdir()
             init_repo(app)
@@ -164,7 +164,7 @@ class BuildPushTests(unittest.TestCase):
 
     def test_dockerfile_specific_ignore_takes_precedence(self):
         with tempfile.TemporaryDirectory() as directory:
-            app = Path(directory)
+            app = Path(directory).resolve()
             (app / "ansirover").mkdir()
             docker_dir = app / "docker"
             docker_dir.mkdir()
@@ -233,7 +233,7 @@ class BuildPushTests(unittest.TestCase):
 
     def test_commit_paths_excludes_even_staged_unknown_file(self):
         with tempfile.TemporaryDirectory() as directory:
-            repo = Path(directory) / "repo"
+            repo = (Path(directory) / "repo").resolve()
             repo.mkdir()
             init_repo(repo)
             allowed = repo / "compose.yaml"
