@@ -65,6 +65,24 @@ README.md
 DEPLOY.md
 ```
 
+## `_uuidgetset` Nginx convention
+
+The generated custom Nginx sidecar includes the canonical guard from `templates/nginx-uuidgetset-snippet.conf`.
+
+Any Directus collection whose name ends in `_uuidgetset` opts into this ingress contract:
+
+```text
+POST  /items/<collection>_uuidgetset
+GET   /items/<collection>_uuidgetset/<uuid-v4>
+PATCH /items/<collection>_uuidgetset/<uuid-v4>
+```
+
+`OPTIONS` is also proxied on those two path shapes for CORS preflight.
+
+For `_uuidgetset` collections, ingress rejects collection GET/listing, collection filtering through GET, bulk mutation, DELETE, blank IDs, sequential IDs, malformed UUIDs, and item IDs that are not syntactically valid UUID v4 values.
+
+The suffix is an explicit security convention, not a substitute for application permissions. The application must still configure its own authorization and field allowlists. For Directus, the protected collection should use a Directus-generated UUID primary key.
+
 ## README.md responsibility
 
 `README.md` is intentionally short and human-oriented so the environment directory renders cleanly on GitHub. It explains the directory purpose and contains a table describing the responsibilities of `compose.yaml`, `DEPLOY.md`, the app inventory, and optional sidecars.
