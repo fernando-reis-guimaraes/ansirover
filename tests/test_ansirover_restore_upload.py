@@ -322,6 +322,7 @@ class CliAndApiTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 self.module.load_ansirover_app(app_directory, "example")
 
+
 class DeployMonitoringTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -391,6 +392,7 @@ class DeployMonitoringTests(unittest.TestCase):
             deploy_call.kwargs["api_path"],
             "/user/apps/appData/example?detached=1",
         )
+
 
 class PostgresPreflightTests(unittest.TestCase):
     @classmethod
@@ -539,6 +541,7 @@ class PostgresPreflightTests(unittest.TestCase):
 
         self.assertIn("timed out", fail.call_args.args[0])
         self.assertNotIn("super-secret", fail.call_args.args[0])
+
 
 class PostDeployTests(unittest.TestCase):
     @classmethod
@@ -700,6 +703,68 @@ class PostDeployTests(unittest.TestCase):
                     {"old-task"},
                 )
 
+    def test_postgres_session_tracker_ignores_pool_expansion(self):
+        state = self.module.create_postgres_session_generation_state(
+            {"100|start-a"}
+        )
+
+        first = self.module.observe_postgres_session_generation(
+            state,
+            {"100|start-a", "101|start-b", "102|start-c"},
+        )
+        second = self.module.observe_postgres_session_generation(
+            state,
+            {"100|start-a", "101|start-b", "102|start-c", "103|start-d"},
+        )
+
+        self.assertFalse(first["reconnect_wave"])
+        self.assertEqual(first["event"], "pool_expansion")
+        self.assertFalse(second["reconnect_wave"])
+        self.assertEqual(second["event"], "pool_expansion")
+
+    def test_postgres_session_tracker_uses_first_connection_as_baseline(self):
+        state = self.module.create_postgres_session_generation_state(set())
+
+        observation = self.module.observe_postgres_session_generation(
+            state,
+            {"100|start-a"},
+        )
+
+        self.assertFalse(observation["reconnect_wave"])
+        self.assertEqual(observation["event"], "initial_connection_baseline")
+
+    def test_postgres_session_tracker_counts_reconnect_after_full_disconnect(self):
+        state = self.module.create_postgres_session_generation_state(
+            {"100|start-a"}
+        )
+
+        disconnected = self.module.observe_postgres_session_generation(
+            state,
+            set(),
+        )
+        reconnected = self.module.observe_postgres_session_generation(
+            state,
+            {"101|start-b"},
+        )
+
+        self.assertFalse(disconnected["reconnect_wave"])
+        self.assertEqual(disconnected["event"], "full_disconnect")
+        self.assertTrue(reconnected["reconnect_wave"])
+        self.assertEqual(reconnected["event"], "reconnect_after_full_disconnect")
+
+    def test_postgres_session_tracker_ignores_partial_pool_churn(self):
+        state = self.module.create_postgres_session_generation_state(
+            {"100|start-a", "101|start-b"}
+        )
+
+        observation = self.module.observe_postgres_session_generation(
+            state,
+            {"101|start-b", "102|start-c"},
+        )
+
+        self.assertFalse(observation["reconnect_wave"])
+        self.assertEqual(observation["event"], "partial_pool_churn")
+
     def test_post_deploy_reconnect_threshold_scales_service_to_zero(self):
         args = mock.Mock(
             server_name="storage",
@@ -708,8 +773,8 @@ class PostDeployTests(unittest.TestCase):
         )
         session_snapshots = [
             {"100|start-a"},
-            {"100|start-a", "101|start-b", "102|start-c"},
-            {"100|start-a", "101|start-b", "102|start-c", "103|start-d"},
+            {"101|start-b"},
+            {"102|start-c"},
         ]
 
         with mock.patch.object(
