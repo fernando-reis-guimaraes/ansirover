@@ -46,6 +46,14 @@ class AnsiRoverTemplateAppCreateTests(unittest.TestCase):
         self.assertIn("ansirover.<name>/", deploy)
         self.assertIn("do not rewrite it automatically", deploy)
 
+    def test_custom_nginx_template_includes_uuidgetset_guard(self):
+        nginx = MODULE.render_custom_nginx("example")
+        self.assertIn("_uuidgetset", nginx)
+        self.assertIn("POST|OPTIONS", nginx)
+        self.assertIn("GET|PATCH|OPTIONS", nginx)
+        self.assertIn("-4[0-9a-fA-F]{3}-", nginx)
+        self.assertIn("return 404;", nginx)
+
     def test_existing_deploy_is_preserved(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "DEPLOY.md"
