@@ -176,7 +176,7 @@ postgresPollInterval       1s
 
 Defaults affect runtime behavior but are not materialized into downloaded YAML. Review `restartDelay` per app: one hour may be useful for a noncritical administration tool but dangerous for a critical application.
 
-`restartDelay` controls `Spec.TaskTemplate.RestartPolicy.Delay`. The other three fields configure the bounded PostgreSQL reconnect observation after Swarm convergence. Multiple new sessions found in one poll count as one reconnect wave.
+`restartDelay` controls `Spec.TaskTemplate.RestartPolicy.Delay`. The other three fields configure the bounded PostgreSQL reconnect observation after Swarm convergence. The reconnect guard tracks connection generations rather than raw new-session counts. Initial connection establishment, pure pool expansion, and partial pool churn with at least one surviving prior session do not count as reconnect waves. A reconnect wave requires a previously observed connection generation to be fully replaced, either directly or after a full disconnect.
 
 Explicit policy is stored in the CapRover description as internal versioned metadata. Human description text is preserved. The metadata contains only policy fields and never environment values or credentials.
 
@@ -211,7 +211,9 @@ The environment verification is a subset comparison: every key declared by the i
 
 The PostgreSQL semantic preflight makes one bounded real connection per discovered PostgreSQL URI to prove that the database exists. This can wake a suspended serverless compute. Credentials are passed through process environment variables and never command arguments or logs. `CAPROVER_DB_PREFLIGHT_TIMEOUT_SECONDS` is an internal CLI timeout and is not app policy.
 
-For a waiting single-app restore, the reconnect guard uses `pg_stat_activity` and requires the application connection URI to declare the expected `application_name`. If the reconnect-wave threshold is reached, the command scales the service to zero with a detached update and fails. Restart delay handles processes that exit; scale-to-zero isolates processes that remain alive while reconnecting.
+For a waiting single-app restore, the reconnect guard uses `pg_stat_activity` and requires the application connection URI to declare the expected `application_name`. If the first PostgreSQL observation is empty, the first later non-empty session set establishes the baseline and does not count as a reconnect. After a baseline exists, a complete session-generation replacement counts as a reconnect wave; a full disconnect stays pending until a replacement generation appears. If the reconnect-wave threshold is reached, the command scales the service to zero with a detached update and fails.
+
+Swarm task convergence/churn remains a separate guardrail and does not depend on a PostgreSQL session baseline, so initialization crash loops are still detected independently. Restart delay handles processes that exit; scale-to-zero isolates processes that remain alive while repeatedly reconnecting.
 
 The `all` mode always applies restart delay, verifies metadata, and verifies inventory-declared environment variables. It skips the slower convergence, churn, and reconnect checks by default. Set `CAPROVER_ANSIROVER_ALL_POST_DEPLOY_CHECKS=true` to run the slower checks for every app. `--no-wait` also skips those slow checks because deploy completion is asynchronous.
 
