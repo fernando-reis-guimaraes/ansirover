@@ -215,9 +215,12 @@ def monitor_post_deploy_postgres_reconnects(args, effective_policy):
         return
 
     reconnect_threshold = int(effective_policy["postgresReconnectThreshold"])
-    expected_application_name = get_expected_application_name(args)
+    expected_application_name = None
     session_state_by_env = {}
     reconnect_wave_count = 0
+
+    if monitorable_connections:
+        expected_application_name = get_expected_application_name(args)
 
     for env_name, connection_string in monitorable_connections:
         initial_sessions = get_postgres_session_ids(
