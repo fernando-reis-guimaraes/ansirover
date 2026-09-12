@@ -6,6 +6,10 @@ from datetime import datetime
 from pathlib import Path
 
 
+REPOSITORY_ROOT = Path(__file__).resolve().parent
+UUIDGETSET_NGINX_SNIPPET = REPOSITORY_ROOT / "templates" / "nginx-uuidgetset-snippet.conf"
+
+
 def log_timestamp():
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
@@ -125,10 +129,18 @@ EXAMPLE_VALUE=change-me
 """
 
 
+def render_uuidgetset_nginx_guard():
+    if not UUIDGETSET_NGINX_SNIPPET.is_file():
+        fail(f"missing canonical Nginx guard: {UUIDGETSET_NGINX_SNIPPET}")
+    return UUIDGETSET_NGINX_SNIPPET.read_text(encoding="utf-8").rstrip()
+
+
 def render_custom_nginx(app_name):
-    return """# DELETE THIS FILE IF THE APP DOES NOT NEED CUSTOM NGINX CONFIG.
+    uuidgetset_guard = render_uuidgetset_nginx_guard()
+    template = """# DELETE THIS FILE IF THE APP DOES NOT NEED CUSTOM NGINX CONFIG.
 # AnsiRover custom Nginx sidecar for __APP_NAME__.
 # Keep this file valid as an Nginx config fragment.
+# Collections ending in _uuidgetset automatically use the UUID-only item guard below.
 
 <%
 if (s.forceSsl) {
@@ -179,6 +191,8 @@ server {
     server_name <%-s.publicDomain%>;
     resolver 127.0.0.11 valid=10s;
     set $upstream http://<%-s.localDomain%>:<%-s.containerHttpPort%>;
+
+__UUIDGETSET_GUARD__
 
     location / {
         <%
@@ -231,7 +245,9 @@ server {
         internal;
     }
 }
-""".replace("__APP_NAME__", app_name)
+"""
+    indented_guard = "\n".join(f"    {line}" if line else "" for line in uuidgetset_guard.splitlines())
+    return template.replace("__APP_NAME__", app_name).replace("__UUIDGETSET_GUARD__", indented_guard)
 
 
 def render_pre_deploy(app_name):
