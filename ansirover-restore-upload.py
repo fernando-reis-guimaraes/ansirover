@@ -325,7 +325,7 @@ def monitor_post_deploy_postgres_reconnects(args, effective_policy):
         )
 
     if monitorable_connections:
-        info(
+        message = (
             "[post-deploy] Monitoring PostgreSQL reconnect generations for "
             + str(monitor_seconds)
             + "s; quarantine threshold="
@@ -334,6 +334,11 @@ def monitor_post_deploy_postgres_reconnects(args, effective_policy):
             + str(poll_seconds)
             + "s."
         )
+
+        if sys.stderr.isatty():
+            message = "\033[33m" + message + "\033[0m"
+
+        info(message)
     else:
         info(
             "[post-deploy] Monitoring stable Swarm task generation for "
