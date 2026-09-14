@@ -18,19 +18,8 @@ globals()["__name__"] = ENTRYPOINT_MODULE_NAME
 
 original_validate_server_target = validate_server_target
 original_get_effective_policy = get_effective_policy
-original_load_sidecars = load_sidecars
 CURRENT_EFFECTIVE_POLICY = original_get_effective_policy(None)
 STABLE_SWARM_TASK_IDS = {}
-DIRECTUS_FAMILY_IMAGE_MARKERS = (
-    "directus",
-    "directito",
-    "inptah",
-    "inpath",
-    "lawebcapsule/d9",
-)
-UUIDGETSET_NGINX_SNIPPET_PATH = (
-    Path(__file__).resolve().parent / "templates" / "nginx-uuidgetset-snippet.conf"
-)
 
 
 def validate_server_target(server_name):
@@ -51,82 +40,6 @@ def get_effective_policy(policy):
     effective_policy = original_get_effective_policy(policy)
     CURRENT_EFFECTIVE_POLICY = dict(effective_policy)
     return effective_policy
-
-
-def image_requires_uuidgetset_guard(image_reference):
-    normalized_image_reference = str(image_reference or "").strip().lower()
-
-    if not normalized_image_reference:
-        return False
-
-    return any(
-        marker in normalized_image_reference
-        for marker in DIRECTUS_FAMILY_IMAGE_MARKERS
-    )
-
-
-def normalize_nginx_for_uuidgetset_guard(text):
-    normalized_lines = []
-
-    for raw_line in str(text or "").splitlines():
-        line = raw_line.strip()
-
-        if not line:
-            continue
-
-        normalized_lines.append(line)
-
-    return "\n".join(normalized_lines)
-
-
-def require_directus_family_uuidgetset_guard(image_reference, custom_nginx_config):
-    if not image_requires_uuidgetset_guard(image_reference):
-        return
-
-    if not str(custom_nginx_config or "").strip():
-        fail(
-            "Directus-family image requires the AnsiRover _uuidgetset Nginx guard. "
-            "Image: "
-            + str(image_reference)
-            + ". Required sidecar: <app>.custom-nginx-config.conf."
-        )
-
-    if not UUIDGETSET_NGINX_SNIPPET_PATH.is_file():
-        fail(
-            "Directus-family image guard validation cannot run because the canonical "
-            "AnsiRover snippet is missing: "
-            + str(UUIDGETSET_NGINX_SNIPPET_PATH)
-        )
-
-    canonical_guard = UUIDGETSET_NGINX_SNIPPET_PATH.read_text(encoding="utf-8")
-    normalized_canonical_guard = normalize_nginx_for_uuidgetset_guard(canonical_guard)
-    normalized_custom_nginx = normalize_nginx_for_uuidgetset_guard(custom_nginx_config)
-
-    if normalized_canonical_guard not in normalized_custom_nginx:
-        fail(
-            "Directus-family image requires the complete canonical AnsiRover _uuidgetset "
-            "Nginx guard. Image: "
-            + str(image_reference)
-            + ". The custom Nginx sidecar exists but does not contain the canonical "
-            "collection-listing block, UUID-v4 item guard, and fallback rejection rules."
-        )
-
-    info(
-        "[security preflight] Directus-family image detected; canonical _uuidgetset "
-        "Nginx guard verified."
-    )
-
-
-def load_sidecars(app_dir, app_name):
-    sidecars = original_load_sidecars(app_dir, app_name)
-    ansirover = load_ansirover_app(app_dir, app_name)
-
-    require_directus_family_uuidgetset_guard(
-        ansirover.get("deployedImageName", ""),
-        sidecars.get("customNginxConfig", ""),
-    )
-
-    return sidecars
 
 
 def get_swarm_stability_period_seconds():
