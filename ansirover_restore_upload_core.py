@@ -1761,10 +1761,10 @@ def expand_env_var_template(value, environment, context):
             fail(
                 "unsupported env var template in "
                 + context
-                + ": expected ${VAR} or escaped literal ${VAR}"
+                + ": expected ${VAR} or escaped literal $${VAR}"
             )
 
-        if match.group(0).startswith("${"):
+        if match.group(0).startswith("$${"):
             return "${" + env_name + "}"
 
         if env_name not in environment:
@@ -1785,7 +1785,7 @@ def expand_env_var_template(value, environment, context):
         fail(
             "unsupported or unterminated env var template in "
             + context
-            + ": only ${VAR} and escaped literal ${VAR} are supported"
+            + ": only ${VAR} and escaped literal $${VAR} are supported"
         )
 
     return expanded_value, templates_found
