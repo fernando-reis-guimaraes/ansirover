@@ -134,7 +134,7 @@ class AnsiRoverPolicyTest(unittest.TestCase):
 
     def test_unknown_schema_version_is_rejected(self):
         payload = base64.b64encode(
-            b'{"schemaVersion":2,"ansirover":{"restartDelay":"1h"}}'
+            b'{"schemaVersion":3,"ansirover":{"restartDelay":"1h"}}'
         ).decode("ascii")
 
         with self.assertRaises(AnsiRoverPolicyError):
