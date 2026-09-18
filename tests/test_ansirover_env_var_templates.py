@@ -167,6 +167,47 @@ class EnvVarTemplateExpansionTests(unittest.TestCase):
                 {"NAME": "present"},
             )
 
+    def test_update_payload_persists_template_not_resolved_value(self):
+        ansirover = {
+            "description": "Human description.",
+            "ansirover": {},
+            "instanceCount": 1,
+            "notExposeAsWebApp": False,
+            "websocketSupport": False,
+            "volumes": [],
+            "ports": [],
+            "containerHttpPort": 80,
+            "tags": [],
+            "httpAuth": {},
+        }
+        sidecars = {
+            "envVars": [{"key": "VALUE", "value": "real-secret"}],
+            "envVarTemplates": {"VALUE": "${SECRET}"},
+            "customNginxConfig": "",
+            "preDeployFunction": "",
+            "serviceUpdateOverride": "",
+        }
+
+        payload = self.module.build_update_payload(
+            app_definition={},
+            app_name="example",
+            ansirover=ansirover,
+            sidecars=sidecars,
+            force_ssl=False,
+        )
+        human, policy, templates = split_description_metadata(
+            payload["description"]
+        )
+
+        self.assertEqual(human, "Human description.")
+        self.assertEqual(policy, {})
+        self.assertEqual(templates, {"VALUE": "${SECRET}"})
+        self.assertNotIn("real-secret", payload["description"])
+        self.assertEqual(
+            payload["envVars"],
+            [{"key": "VALUE", "value": "real-secret"}],
+        )
+
     def test_missing_template_variable_fails_before_restore_steps(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             app_dir = Path(temporary_directory)
