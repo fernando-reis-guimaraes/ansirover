@@ -58,7 +58,11 @@ The CapRover app model does not expose a separate arbitrary metadata field in th
 
 The converter validates and removes that internal block before writing the human `description` field. It reconstructs an `ansirover` mapping only when policy was explicitly declared. Runtime defaults are not added during export.
 
-Duplicate blocks, invalid Base64 or JSON, unsupported schema versions, and incompatible policy fields abort the conversion. The metadata payload is policy-only and must never contain secrets.
+Schema version 1 remains valid for policy-only metadata. Schema version 2 adds `envVarTemplates`, a mapping containing only environment-variable values that used AnsiRover template expansion. Resolved values and secrets are never stored in this metadata.
+
+During export, a key present in `envVarTemplates` is written back to `<app-name>.env-vars.env` using its original template instead of the resolved value stored in CapRover. If metadata references an environment key that no longer exists in live CapRover state, conversion fails rather than fabricating a sidecar.
+
+Duplicate blocks, invalid Base64 or JSON, unsupported schema versions, incompatible policy fields, and invalid template metadata abort the conversion.
 
 ## Sidecars
 
