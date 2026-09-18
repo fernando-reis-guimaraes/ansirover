@@ -180,6 +180,22 @@ Defaults affect runtime behavior but are not materialized into downloaded YAML. 
 
 Explicit policy is stored in the CapRover description as internal versioned metadata. Human description text is preserved. The metadata contains only policy fields and never environment values or credentials.
 
+## Environment variable templates
+
+The `<app-name>.env-vars.env` sidecar supports explicit one-pass expansion from the environment of the AnsiRover process:
+
+```env
+DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@db/app
+```
+
+Only the `${VAR}` form is expanded. The referenced name must already exist in the process environment. A present variable with an empty value is valid. Variables defined by other lines in the sidecar are not expansion sources, and substituted values are not recursively expanded.
+
+Use `${VAR}` when the literal text `${VAR}` must reach CapRover.
+
+Unsupported shell forms such as `${VAR:-default}` are rejected. A missing referenced variable aborts the restore before CapRover mutation.
+
+CapRover receives only resolved values. The original templated values are persisted in the internal AnsiRover description metadata as `envVarTemplates`, never as resolved secrets. A later download/export reconstructs the template in the env sidecar.
+
 ## Restore flow
 
 For each app, the script performs this flow:
