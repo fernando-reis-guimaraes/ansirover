@@ -9,7 +9,7 @@ from pathlib import Path
 from caprover_ansirover_policy import (
     AnsiRoverPolicyError,
     POLICY_KEYS,
-    split_description,
+    split_description_metadata,
 )
 
 ANSI_ROVER_FIELD_ORDER = [
@@ -313,9 +313,11 @@ def build_ansirover_object(app_definition):
     app_name = validate_app_name(app_definition.get("appName"))
 
     try:
-        human_description, explicit_policy = split_description(
-            app_definition.get("description")
-        )
+        (
+            human_description,
+            explicit_policy,
+            _env_var_templates,
+        ) = split_description_metadata(app_definition.get("description"))
     except AnsiRoverPolicyError as error:
         fail("invalid AnsiRover metadata in CapRover description: " + str(error))
 
@@ -508,35 +510,84 @@ def normalize_text_sidecar(value, field_name):
     fail(f"{field_name} has unsupported sidecar type: {type(value).__name__}")
 
 
-def normalize_env_vars_sidecar(value):
+def normalize_env_vars_sidecar(value, env_var_templates=None):
+    templates = dict(env_var_templates or {})
+
     if value is None:
+        if templates:
+            fail(
+                "AnsiRover envVarTemplates references environment variables "
+                "but CapRover envVars is empty"
+            )
         return ""
+
+    seen_keys = set()
+    lines = []
+
+    def add_env_var(key, item_value):
+        normalized_key = str(key)
+
+        if not normalized_key:
+            fail("envVars contains an empty key")
+
+        normalized_value = "" if item_value is None else str(item_value)
+
+        if normalized_key in templates:
+            normalized_value = templates[normalized_key]
+
+        lines.append(normalized_key + "=" + normalized_value)
+        seen_keys.add(normalized_key)
 
     if isinstance(value, str):
         if value == "":
+            if templates:
+                fail(
+                    "AnsiRover envVarTemplates references environment variables "
+                    "but CapRover envVars is empty"
+                )
             return ""
 
-        return value.rstrip("\n") + "\n"
+        if not templates:
+            return value.rstrip("\n") + "\n"
 
-    lines = []
+        for index, raw_line in enumerate(value.splitlines(), start=1):
+            line = raw_line.strip()
 
-    if isinstance(value, dict):
+            if not line or line.startswith("#"):
+                lines.append(raw_line)
+                continue
+
+            if line.startswith("export "):
+                line = line[len("export "):].strip()
+
+            if "=" not in line:
+                fail(
+                    f"envVars line {index} cannot be reconciled with AnsiRover envVarTemplates"
+                )
+
+            key, item_value = line.split("=", 1)
+            add_env_var(key.strip(), item_value)
+
+    elif isinstance(value, dict):
         for key, item_value in value.items():
-            if item_value is None:
-                item_value = ""
+            add_env_var(key, item_value)
 
-            lines.append(str(key) + "=" + str(item_value))
-
-        if not lines:
-            return ""
-
-        return "\n".join(lines) + "\n"
-
-    if isinstance(value, list):
+    elif isinstance(value, list):
         for index, item in enumerate(value):
             if isinstance(item, str):
-                if item.strip():
-                    lines.append(item)
+                line = item.strip()
+
+                if not line:
+                    continue
+
+                if line.startswith("export "):
+                    line = line[len("export "):].strip()
+
+                if "=" not in line:
+                    fail(f"envVars[{index}] string must be KEY=VALUE")
+
+                key, item_value = line.split("=", 1)
+                add_env_var(key.strip(), item_value)
                 continue
 
             if not isinstance(item, dict):
@@ -550,25 +601,38 @@ def normalize_env_vars_sidecar(value):
             if key is None or str(key) == "":
                 fail(f"envVars[{index}] is missing key")
 
-            item_value = item.get("value")
+            add_env_var(key, item.get("value"))
 
-            if item_value is None:
-                item_value = ""
+    else:
+        fail(f"envVars has unsupported sidecar type: {type(value).__name__}")
 
-            lines.append(str(key) + "=" + str(item_value))
+    missing_template_keys = sorted(set(templates) - seen_keys)
 
-        if not lines:
-            return ""
+    if missing_template_keys:
+        fail(
+            "AnsiRover envVarTemplates references keys missing from live CapRover envVars: "
+            + ", ".join(missing_template_keys)
+        )
 
-        return "\n".join(lines) + "\n"
+    if not lines:
+        return ""
 
-    fail(f"envVars has unsupported sidecar type: {type(value).__name__}")
-
+    return "\n".join(lines) + "\n"
 
 def build_sidecar_texts(app_definition):
     sidecar_texts = {}
 
-    env_vars_text = normalize_env_vars_sidecar(app_definition.get("envVars"))
+    try:
+        _human_description, _explicit_policy, env_var_templates = (
+            split_description_metadata(app_definition.get("description"))
+        )
+    except AnsiRoverPolicyError as error:
+        fail("invalid AnsiRover metadata in CapRover description: " + str(error))
+
+    env_vars_text = normalize_env_vars_sidecar(
+        app_definition.get("envVars"),
+        env_var_templates,
+    )
 
     if env_vars_text:
         sidecar_texts["env-vars.env"] = env_vars_text
