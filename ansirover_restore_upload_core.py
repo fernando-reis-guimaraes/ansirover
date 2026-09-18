@@ -22,6 +22,7 @@ from caprover_ansirover_policy import (
     get_effective_policy,
     merge_description,
     split_description,
+    split_description_metadata,
     validate_explicit_policy,
 )
 
@@ -29,6 +30,8 @@ POSTGRES_URI_SCHEMES = {"postgres", "postgresql"}
 APPLICATION_NAME_BYPASS_SUFFIX = "_ALLOW_MISSING_APPLICATION_NAME"
 POST_DEPLOY_MONITOR_APPLICATION_NAME = "ansirover-postdeploy-monitor"
 ALL_POST_DEPLOY_CHECKS_ENV = "CAPROVER_ANSIROVER_ALL_POST_DEPLOY_CHECKS"
+ENV_TEMPLATE_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+ENV_TEMPLATE_TOKEN_PATTERN = re.compile(r"\$\$?\{([^}]*)\}")
 
 
 def log_timestamp():
@@ -621,6 +624,14 @@ def get_app_dir(args):
 def get_inventory_env_vars(args):
     app_dir = get_app_dir(args)
     return parse_env_vars_file(app_dir / f"{args.app_name}.env-vars.env")
+
+
+def get_inventory_env_var_templates(args):
+    app_dir = get_app_dir(args)
+    _env_vars, env_var_templates = parse_env_vars_file_with_templates(
+        app_dir / f"{args.app_name}.env-vars.env"
+    )
+    return env_var_templates
 
 
 def get_inventory_env_map(args):
@@ -1277,21 +1288,35 @@ def verify_live_env_drift(args):
 
 def verify_ansirover_metadata(args, expected_policy):
     inventory = load_ansirover_app(get_app_dir(args), args.app_name)
+    expected_env_var_templates = get_inventory_env_var_templates(args)
 
     try:
-        expected_human_description, _inventory_embedded_policy = split_description(
-            inventory["description"]
-        )
+        (
+            expected_human_description,
+            _inventory_embedded_policy,
+            _inventory_embedded_templates,
+        ) = split_description_metadata(inventory["description"])
         app_definition = require_app_definition(args.server_name, args.app_name)
         actual_description = app_definition.get("description", "")
-        actual_human_description, actual_policy = split_description(actual_description)
+        (
+            actual_human_description,
+            actual_policy,
+            actual_env_var_templates,
+        ) = split_description_metadata(actual_description)
     except AnsiRoverPolicyError as error:
         fail("could not verify persisted AnsiRover metadata: " + str(error))
 
     if actual_policy != expected_policy:
         fail("persisted AnsiRover metadata does not match the explicit inventory policy")
 
-    if not expected_policy and BEGIN_MARKER in str(actual_description):
+    if actual_env_var_templates != expected_env_var_templates:
+        fail("persisted AnsiRover metadata does not match the inventory env var templates")
+
+    if (
+        not expected_policy
+        and not expected_env_var_templates
+        and BEGIN_MARKER in str(actual_description)
+    ):
         fail("persisted CapRover description contains unexpected empty AnsiRover metadata")
 
     if actual_human_description != expected_human_description:
@@ -1723,13 +1748,60 @@ def read_optional_sidecar(path):
     return path.read_text(encoding="utf-8")
 
 
-def parse_env_vars_file(path):
+def expand_env_var_template(value, environment, context):
+    source_value = str(value)
+    templates_found = False
+
+    def replace_token(match):
+        nonlocal templates_found
+        templates_found = True
+        env_name = match.group(1)
+
+        if not ENV_TEMPLATE_NAME_PATTERN.fullmatch(env_name):
+            fail(
+                "unsupported env var template in "
+                + context
+                + ": expected ${VAR} or escaped literal ${VAR}"
+            )
+
+        if match.group(0).startswith("${"):
+            return "${" + env_name + "}"
+
+        if env_name not in environment:
+            fail(
+                "environment variable "
+                + env_name
+                + " referenced by env var template in "
+                + context
+                + " is not set"
+            )
+
+        return str(environment[env_name])
+
+    expanded_value = ENV_TEMPLATE_TOKEN_PATTERN.sub(replace_token, source_value)
+    residual_source = ENV_TEMPLATE_TOKEN_PATTERN.sub("", source_value)
+
+    if "${" in residual_source:
+        fail(
+            "unsupported or unterminated env var template in "
+            + context
+            + ": only ${VAR} and escaped literal ${VAR} are supported"
+        )
+
+    return expanded_value, templates_found
+
+
+def parse_env_vars_file_with_templates(path, environment=None):
     text = read_optional_sidecar(path)
 
     if not text:
-        return []
+        return [], {}
+
+    if environment is None:
+        environment = os.environ
 
     env_vars = []
+    env_var_templates = {}
 
     for line_number, raw_line in enumerate(text.splitlines(), start=1):
         line = raw_line.strip()
@@ -1759,19 +1831,43 @@ def parse_env_vars_file(path):
             with contextlib.suppress(json.JSONDecodeError):
                 value = json.loads(value)
 
+        template_value = str(value)
+        expanded_value, has_template = expand_env_var_template(
+            template_value,
+            environment,
+            f"line {line_number} in {path}",
+        )
+
+        if has_template:
+            env_var_templates[key] = template_value
+        else:
+            env_var_templates.pop(key, None)
+
         env_vars.append(
             {
                 "key": key,
-                "value": str(value),
+                "value": expanded_value,
             }
         )
 
+    return env_vars, env_var_templates
+
+
+def parse_env_vars_file(path, environment=None):
+    env_vars, _env_var_templates = parse_env_vars_file_with_templates(
+        path,
+        environment=environment,
+    )
     return env_vars
 
 
 def load_sidecars(app_dir, app_name):
+    env_vars, env_var_templates = parse_env_vars_file_with_templates(
+        app_dir / f"{app_name}.env-vars.env"
+    )
     return {
-        "envVars": parse_env_vars_file(app_dir / f"{app_name}.env-vars.env"),
+        "envVars": env_vars,
+        "envVarTemplates": env_var_templates,
         "preDeployFunction": read_optional_sidecar(app_dir / f"{app_name}.pre-deploy-function.js"),
         "serviceUpdateOverride": read_optional_sidecar(app_dir / f"{app_name}.service-update-override.yaml"),
         "customNginxConfig": read_optional_sidecar(app_dir / f"{app_name}.custom-nginx-config.conf"),
@@ -2099,11 +2195,12 @@ def validate_existing_description_metadata(app_definition):
         fail("existing CapRover description has invalid AnsiRover metadata: " + str(error))
 
 
-def build_persisted_description(ansirover):
+def build_persisted_description(ansirover, env_var_templates=None):
     try:
         return merge_description(
             ansirover["description"],
             ansirover.get("ansirover"),
+            env_var_templates,
         )
     except AnsiRoverPolicyError as error:
         fail("inventory description has invalid AnsiRover metadata: " + str(error))
@@ -2130,7 +2227,10 @@ def build_update_payload(app_definition, app_name, ansirover, sidecars, force_ss
         "volumes": normalize_volumes(ansirover.get("volumes", [])),
         "ports": normalize_ports(ansirover.get("ports", [])),
         "containerHttpPort": ansirover["containerHttpPort"],
-        "description": build_persisted_description(ansirover),
+        "description": build_persisted_description(
+            ansirover,
+            sidecars.get("envVarTemplates", {}),
+        ),
         "envVars": sidecars["envVars"],
         "tags": normalize_tags(ansirover.get("tags", [])),
         "redirectDomain": app_definition.get("redirectDomain", ""),
