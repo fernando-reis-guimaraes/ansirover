@@ -122,6 +122,8 @@ def render_env(app_name):
     return f"""# DELETE THIS FILE IF THE APP DOES NOT NEED ENVIRONMENT VARIABLES.
 # AnsiRover env-vars sidecar for {app_name}.
 # One KEY=value per line.
+# Values may reference process environment variables with ${VAR}.
+# Use ${VAR} to keep a literal ${VAR}. Expansion is one-pass and nonrecursive.
 # These values are restored as CapRover app environment variables.
 
 APP_NAME={app_name}
