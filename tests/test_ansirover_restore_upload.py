@@ -613,7 +613,7 @@ class PostgresPreflightTests(unittest.TestCase):
             "get_inventory_env_map",
             return_value={
                 "DB_CLIENT": "pg",
-                "DB_CONNECTION_STRING": "postgresql://user:super-secret@db.example.test:5432/appdb?sslmode=require&application_name=example",
+                "DB_CONNECTION_STRING": "postgresql://user:super-secret@db.example.test:5432/appdb?sslmode=verify-full&sslrootcert=system&application_name=example",
             },
         ), mock.patch.object(
             self.module.shutil,
@@ -636,9 +636,41 @@ class PostgresPreflightTests(unittest.TestCase):
         self.assertNotIn("super-secret", " ".join(command))
         self.assertEqual(environment["PGPASSWORD"], "super-secret")
         self.assertEqual(environment["PGDATABASE"], "appdb")
-        self.assertEqual(environment["PGSSLMODE"], "require")
+        self.assertEqual(environment["PGSSLMODE"], "verify-full")
+        self.assertEqual(environment["PGSSLROOTCERT"], "system")
         self.assertEqual(environment["PGAPPNAME"], "example")
         self.assertEqual(run.call_args.kwargs["timeout"], 15)
+
+    def test_psql_preflight_reports_sanitized_connection_error(self):
+        connection_string = (
+            "postgresql://user:super-secret@db.example.test/appdb"
+            "?application_name=example"
+        )
+
+        with mock.patch.object(
+            self.module.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess(
+                args=[],
+                returncode=2,
+                stdout="",
+                stderr="certificate verification failed for password super-secret",
+            ),
+        ), mock.patch.object(
+            self.module,
+            "fail",
+            side_effect=RuntimeError,
+        ) as fail:
+            with self.assertRaises(RuntimeError):
+                self.module.run_postgres_connection_preflight(
+                    "DATABASE_URL",
+                    connection_string,
+                )
+
+        message = fail.call_args.args[0]
+        self.assertIn("certificate verification failed", message)
+        self.assertIn("<redacted>", message)
+        self.assertNotIn("super-secret", message)
 
     def test_psql_preflight_timeout_does_not_report_credentials(self):
         connection_string = (

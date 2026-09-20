@@ -784,6 +784,7 @@ def build_psql_environment(connection_string):
     query = parse_qs(parsed.query, keep_blank_values=True)
     query_to_environment = {
         "sslmode": "PGSSLMODE",
+        "sslrootcert": "PGSSLROOTCERT",
         "channel_binding": "PGCHANNELBINDING",
         "application_name": "PGAPPNAME",
         "options": "PGOPTIONS",
@@ -796,6 +797,22 @@ def build_psql_environment(connection_string):
             environment[environment_key] = values[-1]
 
     return environment, database_name
+
+
+def sanitize_postgres_error(error_output, connection_string):
+    sanitized_output = str(error_output).strip()
+    parsed = urlparse(connection_string)
+    sensitive_values = []
+
+    if parsed.password:
+        sensitive_values.append(parsed.password)
+        sensitive_values.append(unquote(parsed.password))
+
+    for sensitive_value in sensitive_values:
+        if sensitive_value:
+            sanitized_output = sanitized_output.replace(sensitive_value, "<redacted>")
+
+    return sanitized_output
 
 
 def run_postgres_connection_preflight(env_name, connection_string):
@@ -825,10 +842,19 @@ def run_postgres_connection_preflight(env_name, connection_string):
         fail("database preflight timed out for " + env_name)
 
     if completed_process.returncode != 0:
-        fail(
+        error_message = (
             "database preflight failed: PostgreSQL connection could not be established for "
             + env_name
         )
+        error_detail = sanitize_postgres_error(
+            completed_process.stderr,
+            connection_string,
+        )
+
+        if error_detail:
+            error_message += ": " + error_detail
+
+        fail(error_message)
 
     actual_database_lines = completed_process.stdout.strip().splitlines()
     actual_database = ""
