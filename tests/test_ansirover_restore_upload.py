@@ -641,6 +641,21 @@ class PostgresPreflightTests(unittest.TestCase):
         self.assertEqual(environment["PGAPPNAME"], "example")
         self.assertEqual(run.call_args.kwargs["timeout"], 15)
 
+    def test_psql_preflight_uses_system_roots_for_portable_verify_full_uri(self):
+        connection_string = (
+            "postgresql://user:secret@db.example.test:5432/appdb"
+            "?sslmode=verify-full&application_name=example"
+        )
+
+        with mock.patch.dict(self.module.os.environ, {}, clear=True):
+            environment, database_name = self.module.build_psql_environment(
+                connection_string
+            )
+
+        self.assertEqual(database_name, "appdb")
+        self.assertEqual(environment["PGSSLMODE"], "verify-full")
+        self.assertEqual(environment["PGSSLROOTCERT"], "system")
+
     def test_psql_preflight_reports_sanitized_connection_error(self):
         connection_string = (
             "postgresql://user:super-secret@db.example.test/appdb"
