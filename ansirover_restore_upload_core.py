@@ -2326,7 +2326,7 @@ def restore_one_app_steps(args):
     # Without it, config/SSL changes could be applied before deploy discovers a missing image,
     # leaving the destination app partially restored. URL mode skips it by design because that
     # mode is API-only and lets CapRover validate/pull the already-published registry image.
-    if should_preflight_deploy_image(server_name, args.with_image):
+    if should_preflight_deploy_image(server_name, args.with_image) and getattr(args, "skip_checks", False) is not True:
         step("preflight", "Checking deploy image availability before changing the app...")
         require_deploy_image_available(server_name, ansirover["deployedImageName"])
     elif is_caprover_url(server_name):
@@ -2393,7 +2393,7 @@ def restore_one_app_steps(args):
         caprover_root_domain=caprover_root_domain,
     )
 
-    if args.with_image:
+    if args.with_image and getattr(args, "skip_checks", False) is not True:
         step("preflight", "Checking restored deploy image availability...")
         require_deploy_image_available(server_name, deploy_image_name)
 
@@ -2436,13 +2436,17 @@ def restore_one_app(args, run_post_deploy_checks=True):
     ansirover = load_ansirover_app(get_app_dir(args), args.app_name)
     explicit_policy = ansirover.get("ansirover", {})
     effective_policy = get_effective_policy(explicit_policy)
+    skip_checks = getattr(args, "skip_checks", False) is True
 
-    info("[guardrails] Running semantic preflight checks...")
-    preflight_postgres(args)
+    if skip_checks:
+        info("[guardrails] --skip-checks selected; pre-deploy and post-deploy checks skipped.")
+    else:
+        info("[guardrails] Running semantic preflight checks...")
+        preflight_postgres(args)
 
     baseline_task_ids = set()
 
-    if run_post_deploy_checks:
+    if run_post_deploy_checks and not skip_checks:
         baseline_task_ids = get_task_state_snapshot(args.server_name, args.app_name)
 
     restore_one_app_steps(args)
@@ -2451,6 +2455,8 @@ def restore_one_app(args, run_post_deploy_checks=True):
         args.app_name,
         str(effective_policy["restartDelay"]),
     )
+    if skip_checks:
+        return
     verify_ansirover_metadata(args, explicit_policy)
     verify_live_env_drift(args)
 
@@ -2499,6 +2505,7 @@ def get_restore_run_options(args, ignore_names):
         "withDockerHub": bool(args.with_dockerhub),
         "withVolumes": bool(args.with_volumes),
         "waitDeploy": bool(args.wait_deploy),
+        "skipChecks": getattr(args, "skip_checks", False) is True,
         "limit": args.limit,
         "ignore": sorted(ignore_names),
     }
@@ -2826,6 +2833,7 @@ def restore_all_apps(args):
             with_dockerhub=args.with_dockerhub,
             with_volumes=args.with_volumes,
             wait_deploy=args.wait_deploy,
+            skip_checks=getattr(args, "skip_checks", False) is True,
             limit=None,
             ignore=None,
         )
@@ -2914,6 +2922,7 @@ def parse_args(arguments=None):
     parser.add_argument("--with-image", action="store_true", help="restore/upload image archive, except externally pullable images by default; not supported with a URL target")
     parser.add_argument("--with-dockerhub", action="store_true", help="with --with-image, also restore/upload externally pullable image archives")
     parser.add_argument("--with-volumes", action="store_true", help="restore named Docker volume archives; not supported with a URL target")
+    parser.add_argument("--skip-checks", action="store_true", help="skip pre-deploy and post-deploy validation checks; deploy only")
     deploy_wait_group = parser.add_mutually_exclusive_group()
     deploy_wait_group.add_argument(
         "--wait-deploy",
