@@ -796,6 +796,12 @@ def build_psql_environment(connection_string):
         if values:
             environment[environment_key] = values[-1]
 
+    ssl_mode_values = query.get("sslmode")
+    ssl_root_cert_values = query.get("sslrootcert")
+
+    if ssl_mode_values and ssl_mode_values[-1] == "verify-full" and not ssl_root_cert_values:
+        environment["PGSSLROOTCERT"] = "system"
+
     return environment, database_name
 
 
