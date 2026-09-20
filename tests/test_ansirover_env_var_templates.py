@@ -82,13 +82,14 @@ class EnvVarTemplateExpansionTests(unittest.TestCase):
             "ansirover_restore_upload_env_templates_test",
         )
 
-    def parse(self, text, environment):
+    def parse(self, text, environment, app_name=None):
         with tempfile.TemporaryDirectory() as temporary_directory:
             path = Path(temporary_directory) / "example.env-vars.env"
             path.write_text(text, encoding="utf-8")
             return self.module.parse_env_vars_file_with_templates(
                 path,
                 environment=environment,
+                app_name=app_name,
             )
 
     def test_simple_templates_expand_from_process_environment(self):
@@ -115,6 +116,47 @@ class EnvVarTemplateExpansionTests(unittest.TestCase):
                 "DATABASE_URL": "postgresql://${DB_USER}:${DB_PASSWORD}@db/app"
             },
         )
+
+    def test_builtin_app_name_templates_expand_from_restore_app_name(self):
+        env_vars, templates = self.parse(
+            (
+                "LOWER=${appname}\n"
+                "CAMEL=${appName}\n"
+                "COMPOSED=prefix-${appName}-suffix\n"
+            ),
+            {
+                "appname": "must-not-be-used",
+                "appName": "must-not-be-used",
+            },
+            app_name="inventory-app",
+        )
+
+        self.assertEqual(
+            env_vars,
+            [
+                {"key": "LOWER", "value": "inventory-app"},
+                {"key": "CAMEL", "value": "inventory-app"},
+                {"key": "COMPOSED", "value": "prefix-inventory-app-suffix"},
+            ],
+        )
+        self.assertEqual(
+            templates,
+            {
+                "LOWER": "${appname}",
+                "CAMEL": "${appName}",
+                "COMPOSED": "prefix-${appName}-suffix",
+            },
+        )
+
+    def test_escaped_builtin_app_name_template_is_kept_literal(self):
+        env_vars, templates = self.parse(
+            "VALUE=$${appName}\n",
+            {},
+            app_name="inventory-app",
+        )
+
+        self.assertEqual(env_vars, [{"key": "VALUE", "value": "${appName}"}])
+        self.assertEqual(templates, {"VALUE": "$${appName}"})
 
     def test_escaped_template_is_kept_literal(self):
         env_vars, templates = self.parse(
@@ -207,6 +249,23 @@ class EnvVarTemplateExpansionTests(unittest.TestCase):
             payload["envVars"],
             [{"key": "VALUE", "value": "real-secret"}],
         )
+
+    def test_inventory_env_vars_receive_restore_app_name(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            app_dir = Path(temporary_directory)
+            (app_dir / "example.env-vars.env").write_text(
+                "APP_NAME=${appName}\n",
+                encoding="utf-8",
+            )
+            args = mock.Mock(
+                app_name="example",
+                path=str(app_dir),
+            )
+
+            self.assertEqual(
+                self.module.get_inventory_env_vars(args),
+                [{"key": "APP_NAME", "value": "example"}],
+            )
 
     def test_missing_template_variable_fails_before_restore_steps(self):
         with tempfile.TemporaryDirectory() as temporary_directory:

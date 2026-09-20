@@ -190,7 +190,16 @@ DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@db/app
 
 Only the `${VAR}` form is expanded. The referenced name must already exist in the process environment. A present variable with an empty value is valid. Variables defined by other lines in the sidecar are not expansion sources, and substituted values are not recursively expanded.
 
-Use `${VAR}` when the literal text `${VAR}` must reach CapRover.
+Two reserved built-in templates are available without process environment variables:
+
+```env
+APP_NAME=${appName}
+APP_NAME_LEGACY=${appname}
+```
+
+Both expand to the name of the app currently being restored. These built-ins take precedence over process environment variables with the same names.
+
+Use `$${VAR}` when the literal text `${VAR}` must reach CapRover.
 
 Unsupported shell forms such as `${VAR:-default}` are rejected. A missing referenced variable aborts the restore before CapRover mutation.
 

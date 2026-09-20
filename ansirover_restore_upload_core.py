@@ -623,13 +623,17 @@ def get_app_dir(args):
 
 def get_inventory_env_vars(args):
     app_dir = get_app_dir(args)
-    return parse_env_vars_file(app_dir / f"{args.app_name}.env-vars.env")
+    return parse_env_vars_file(
+        app_dir / f"{args.app_name}.env-vars.env",
+        app_name=args.app_name,
+    )
 
 
 def get_inventory_env_var_templates(args):
     app_dir = get_app_dir(args)
     _env_vars, env_var_templates = parse_env_vars_file_with_templates(
-        app_dir / f"{args.app_name}.env-vars.env"
+        app_dir / f"{args.app_name}.env-vars.env",
+        app_name=args.app_name,
     )
     return env_var_templates
 
@@ -1748,7 +1752,7 @@ def read_optional_sidecar(path):
     return path.read_text(encoding="utf-8")
 
 
-def expand_env_var_template(value, environment, context):
+def expand_env_var_template(value, environment, context, app_name=None):
     source_value = str(value)
     templates_found = False
 
@@ -1766,6 +1770,17 @@ def expand_env_var_template(value, environment, context):
 
         if match.group(0).startswith("$${"):
             return "${" + env_name + "}"
+
+        if env_name in {"appname", "appName"}:
+            if app_name is None:
+                fail(
+                    "app name is required to expand built-in env var template ${"
+                    + env_name
+                    + "} in "
+                    + context
+                )
+
+            return str(app_name)
 
         if env_name not in environment:
             fail(
@@ -1791,7 +1806,7 @@ def expand_env_var_template(value, environment, context):
     return expanded_value, templates_found
 
 
-def parse_env_vars_file_with_templates(path, environment=None):
+def parse_env_vars_file_with_templates(path, environment=None, app_name=None):
     text = read_optional_sidecar(path)
 
     if not text:
@@ -1836,6 +1851,7 @@ def parse_env_vars_file_with_templates(path, environment=None):
             template_value,
             environment,
             f"line {line_number} in {path}",
+            app_name=app_name,
         )
 
         if has_template:
@@ -1853,17 +1869,19 @@ def parse_env_vars_file_with_templates(path, environment=None):
     return env_vars, env_var_templates
 
 
-def parse_env_vars_file(path, environment=None):
+def parse_env_vars_file(path, environment=None, app_name=None):
     env_vars, _env_var_templates = parse_env_vars_file_with_templates(
         path,
         environment=environment,
+        app_name=app_name,
     )
     return env_vars
 
 
 def load_sidecars(app_dir, app_name):
     env_vars, env_var_templates = parse_env_vars_file_with_templates(
-        app_dir / f"{app_name}.env-vars.env"
+        app_dir / f"{app_name}.env-vars.env",
+        app_name=app_name,
     )
     return {
         "envVars": env_vars,
