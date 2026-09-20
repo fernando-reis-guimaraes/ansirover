@@ -86,6 +86,44 @@ class AnsiRoverExportTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.module.build_ansirover_object(make_app_definition(description))
 
+    def test_custom_domains_are_exported_with_ssl_state(self):
+        app_definition = make_app_definition("")
+        app_definition["customDomain"] = [
+            {
+                "publicDomain": "app.example.com",
+                "hasSsl": True,
+            }
+        ]
+
+        exported = self.module.build_ansirover_object(app_definition)
+        yaml_text = self.module.emit_ansirover_yaml(exported, "example")
+
+        self.assertEqual(
+            exported["customDomain"],
+            [
+                {
+                    "publicDomain": "app.example.com",
+                    "hasSsl": True,
+                }
+            ],
+        )
+        self.assertIn(
+            "customDomain:\n"
+            "  - publicDomain: app.example.com\n"
+            "    hasSsl: true\n",
+            yaml_text,
+        )
+
+    def test_duplicate_custom_domains_are_rejected_case_insensitively(self):
+        app_definition = make_app_definition("")
+        app_definition["customDomain"] = [
+            {"publicDomain": "app.example.com", "hasSsl": True},
+            {"publicDomain": "APP.EXAMPLE.COM", "hasSsl": False},
+        ]
+
+        with self.assertRaises(SystemExit):
+            self.module.build_ansirover_object(app_definition)
+
 
 if __name__ == "__main__":
     unittest.main()

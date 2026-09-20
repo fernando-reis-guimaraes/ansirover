@@ -1616,7 +1616,7 @@ def parse_simple_ansirover_yaml(yaml_path):
             index += 1
             continue
 
-        if key in {"volumes", "ports", "tags"} and value == "":
+        if key in {"volumes", "ports", "tags", "customDomain"} and value == "":
             items = []
             index += 1
 
@@ -1728,6 +1728,10 @@ def load_ansirover_app(app_dir, app_name):
 
     if not isinstance(ansirover.get("httpAuth", {}), dict):
         fail("field httpAuth must be an object")
+
+    ansirover["customDomain"] = normalize_custom_domains(
+        ansirover.get("customDomain", [])
+    )
 
     explicit_policy = ansirover.get("ansirover")
 
@@ -1990,6 +1994,103 @@ def normalize_http_auth(value):
         normalized[key] = item_value
 
     return normalized
+
+
+def normalize_custom_domains(value):
+    if not isinstance(value, list):
+        fail("field customDomain must be a list")
+
+    normalized_domains = []
+    seen_domains = set()
+
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            fail(f"customDomain[{index}] must be an object")
+
+        public_domain = item.get("publicDomain")
+
+        if not isinstance(public_domain, str) or not public_domain.strip():
+            fail(f"customDomain[{index}].publicDomain must be a non-empty string")
+
+        has_ssl = item.get("hasSsl", False)
+
+        if not isinstance(has_ssl, bool):
+            fail(f"customDomain[{index}].hasSsl must be a boolean")
+
+        public_domain = public_domain.strip().lower()
+
+        if public_domain in seen_domains:
+            fail(f"customDomain contains duplicate publicDomain: {public_domain}")
+
+        seen_domains.add(public_domain)
+        normalized_domains.append(
+            {
+                "publicDomain": public_domain,
+                "hasSsl": has_ssl,
+            }
+        )
+
+    return normalized_domains
+
+
+def configure_custom_domains(
+    server_name,
+    app_name,
+    app_definition,
+    desired_custom_domains,
+):
+    current_custom_domain_value = app_definition.get("customDomain")
+
+    if current_custom_domain_value is None:
+        current_custom_domain_value = []
+
+    current_custom_domains = normalize_custom_domains(
+        current_custom_domain_value
+    )
+    current_by_domain = {
+        item["publicDomain"]: item for item in current_custom_domains
+    }
+
+    for desired_domain in desired_custom_domains:
+        public_domain = desired_domain["publicDomain"]
+        current_domain = current_by_domain.get(public_domain)
+
+        if current_domain is None:
+            info(f"[custom domain] Adding {public_domain} to {app_name}...")
+            run_caprover_api(
+                server_name=server_name,
+                api_path="/user/apps/appDefinitions/customdomain",
+                method="POST",
+                data={
+                    "appName": app_name,
+                    "customDomain": public_domain,
+                },
+            )
+            current_domain = {
+                "publicDomain": public_domain,
+                "hasSsl": False,
+            }
+        else:
+            info(f"[custom domain] Domain already associated with {app_name}: {public_domain}")
+
+        if desired_domain["hasSsl"] and not current_domain["hasSsl"]:
+            info(f"[custom domain] Enabling SSL for {public_domain}...")
+            run_caprover_api(
+                server_name=server_name,
+                api_path="/user/apps/appDefinitions/enablecustomdomainssl",
+                method="POST",
+                data={
+                    "appName": app_name,
+                    "customDomain": public_domain,
+                },
+            )
+        elif desired_domain["hasSsl"]:
+            info(f"[custom domain] SSL already enabled for {public_domain}.")
+        elif current_domain["hasSsl"]:
+            info(
+                f"[custom domain] SSL is already enabled for {public_domain}; "
+                "restore does not disable existing certificates."
+            )
 
 
 def get_named_volume_names(ansirover):
@@ -2360,13 +2461,20 @@ def restore_one_app_steps(args):
     )
     update_app_definition(server_name, payload)
 
-    step("restore 6/13", "Enabling base-domain SSL early, before restore/deploy work...")
+    step("restore 6/13", "Configuring base and custom domains before restore/deploy work...")
     app_definition = require_app_definition(server_name, app_name)
 
     if ansirover["notExposeAsWebApp"]:
         info("[ssl] Skipping SSL because app is not exposed as web app.")
     else:
         enable_base_domain_ssl_if_needed(server_name, app_name, app_definition)
+
+    configure_custom_domains(
+        server_name=server_name,
+        app_name=app_name,
+        app_definition=app_definition,
+        desired_custom_domains=ansirover["customDomain"],
+    )
 
     step("restore 7/13", "Restoring named volumes if requested...")
     restore_volumes_if_requested(

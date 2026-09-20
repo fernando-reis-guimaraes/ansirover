@@ -31,6 +31,9 @@ instanceCount: 1
 containerHttpPort: 80
 notExposeAsWebApp: false
 websocketSupport: true
+customDomain:
+  - publicDomain: app.example.com
+    hasSsl: true
 tags:
   - tagName: tag-a
   - tagName: tag-b
@@ -101,6 +104,18 @@ tags:
 ```
 
 Only `tagName` is managed by AnsiRover.
+
+## customDomain
+
+Custom domains are kept with their SSL state:
+
+```yaml
+customDomain:
+  - publicDomain: app.example.com
+    hasSsl: true
+```
+
+An empty list is emitted when the app has no custom domains.
 
 ## httpAuth
 

@@ -53,6 +53,12 @@ class CliEntrypointTests(unittest.TestCase):
             "hasPersistentData": False,
             "instanceCount": 1,
             "containerHttpPort": 80,
+            "customDomain": [
+                {
+                    "publicDomain": "app.example.com",
+                    "hasSsl": True,
+                }
+            ],
         }
         for with_json in (False, True):
             with self.subTest(with_json=with_json):
@@ -66,6 +72,8 @@ class CliEntrypointTests(unittest.TestCase):
                     )
                 yaml_text = (output / "example.yaml").read_text()
                 self.assertIn("example/app:latest", yaml_text)
+                self.assertIn("publicDomain: app.example.com", yaml_text)
+                self.assertIn("hasSsl: true", yaml_text)
                 self.assertEqual((output / "example.json").exists(), with_json)
 
 

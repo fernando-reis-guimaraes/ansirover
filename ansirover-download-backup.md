@@ -3,6 +3,7 @@
 Download CapRover app definitions into AnsiRover backup folders.
 
 It can optionally download custom/local Docker image archives and named Docker volume archives.
+Custom domains and their SSL state are included in each generated YAML inventory.
 
 ## Usage
 

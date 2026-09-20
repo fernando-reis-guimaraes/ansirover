@@ -322,6 +322,128 @@ class CliAndApiTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 self.module.load_ansirover_app(app_directory, "example")
 
+    def test_inventory_parser_normalizes_custom_domains(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            app_directory = Path(temporary_directory)
+            (app_directory / "example.yaml").write_text(
+                "\n".join(
+                    (
+                        "appName: example",
+                        "deployedImageName: example/app:latest",
+                        'description: ""',
+                        "hasPersistentData: false",
+                        "instanceCount: 1",
+                        "containerHttpPort: 80",
+                        "notExposeAsWebApp: false",
+                        "websocketSupport: false",
+                        "customDomain:",
+                        "  - publicDomain: App.Example.COM",
+                        "    hasSsl: true",
+                        "",
+                    )
+                ),
+                encoding="utf-8",
+            )
+
+            inventory = self.module.load_ansirover_app(app_directory, "example")
+
+        self.assertEqual(
+            inventory["customDomain"],
+            [
+                {
+                    "publicDomain": "app.example.com",
+                    "hasSsl": True,
+                }
+            ],
+        )
+
+    def test_configure_custom_domains_adds_domain_then_enables_ssl(self):
+        with mock.patch.object(self.module, "run_caprover_api") as run_api:
+            self.module.configure_custom_domains(
+                server_name="storage",
+                app_name="example",
+                app_definition={"customDomain": []},
+                desired_custom_domains=[
+                    {
+                        "publicDomain": "app.example.com",
+                        "hasSsl": True,
+                    }
+                ],
+            )
+
+        self.assertEqual(
+            run_api.call_args_list,
+            [
+                mock.call(
+                    server_name="storage",
+                    api_path="/user/apps/appDefinitions/customdomain",
+                    method="POST",
+                    data={
+                        "appName": "example",
+                        "customDomain": "app.example.com",
+                    },
+                ),
+                mock.call(
+                    server_name="storage",
+                    api_path="/user/apps/appDefinitions/enablecustomdomainssl",
+                    method="POST",
+                    data={
+                        "appName": "example",
+                        "customDomain": "app.example.com",
+                    },
+                ),
+            ],
+        )
+
+    def test_configure_custom_domains_only_enables_missing_ssl(self):
+        with mock.patch.object(self.module, "run_caprover_api") as run_api:
+            self.module.configure_custom_domains(
+                server_name="storage",
+                app_name="example",
+                app_definition={
+                    "customDomain": [
+                        {
+                            "publicDomain": "app.example.com",
+                            "hasSsl": False,
+                        }
+                    ]
+                },
+                desired_custom_domains=[
+                    {
+                        "publicDomain": "app.example.com",
+                        "hasSsl": True,
+                    }
+                ],
+            )
+
+        run_api.assert_called_once_with(
+            server_name="storage",
+            api_path="/user/apps/appDefinitions/enablecustomdomainssl",
+            method="POST",
+            data={
+                "appName": "example",
+                "customDomain": "app.example.com",
+            },
+        )
+
+    def test_configure_custom_domains_is_idempotent(self):
+        custom_domains = [
+            {
+                "publicDomain": "app.example.com",
+                "hasSsl": True,
+            }
+        ]
+
+        with mock.patch.object(self.module, "run_caprover_api") as run_api:
+            self.module.configure_custom_domains(
+                server_name="storage",
+                app_name="example",
+                app_definition={"customDomain": custom_domains},
+                desired_custom_domains=custom_domains,
+            )
+
+        run_api.assert_not_called()
+
 
 class DeployMonitoringTests(unittest.TestCase):
     @classmethod

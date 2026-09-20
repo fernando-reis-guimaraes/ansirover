@@ -4,6 +4,8 @@ Restore CapRover apps from AnsiRover backup folders.
 
 It can restore app configuration, sidecars, selected image archives, and named Docker volume archives.
 
+Custom domains declared in the YAML inventory are associated with the app. Domains with `hasSsl: true` also have SSL enabled through CapRover.
+
 ## Usage
 
 ```bash
@@ -150,6 +152,18 @@ Example:
 ```bash
 ansirover-restore-upload storage all /Volumes/UmaGit/inventory-products/frginbox --ignore ses,secbyte
 ```
+
+## Custom domains
+
+The inventory may declare one or more custom domains:
+
+```yaml
+customDomain:
+  - publicDomain: app.example.com
+    hasSsl: true
+```
+
+The domain must already resolve to the destination CapRover server so CapRover can verify it. Restore adds missing domains and enables requested SSL certificates. It does not remove additional live domains or disable an existing certificate when the inventory has `hasSsl: false`.
 
 ## Optional app policy
 

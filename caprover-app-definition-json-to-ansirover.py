@@ -22,6 +22,7 @@ ANSI_ROVER_FIELD_ORDER = [
     "containerHttpPort",
     "notExposeAsWebApp",
     "websocketSupport",
+    "customDomain",
     "tags",
     "httpAuth",
     "volumes",
@@ -309,6 +310,46 @@ def normalize_http_auth(value):
     return normalized_http_auth
 
 
+def normalize_custom_domains(value):
+    if value is None:
+        return []
+
+    if not isinstance(value, list):
+        fail("customDomain must be a list")
+
+    normalized_domains = []
+    seen_domains = set()
+
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            fail(f"customDomain[{index}] must be an object")
+
+        public_domain = item.get("publicDomain")
+
+        if not isinstance(public_domain, str) or not public_domain.strip():
+            fail(f"customDomain[{index}].publicDomain must be a non-empty string")
+
+        public_domain = public_domain.strip()
+        normalized_domain = public_domain.lower()
+
+        if normalized_domain in seen_domains:
+            fail(f"customDomain contains duplicate publicDomain: {public_domain}")
+
+        seen_domains.add(normalized_domain)
+        normalized_domains.append(
+            {
+                "publicDomain": public_domain,
+                "hasSsl": to_boolean(
+                    item.get("hasSsl"),
+                    f"customDomain[{index}].hasSsl",
+                    False,
+                ),
+            }
+        )
+
+    return normalized_domains
+
+
 def build_ansirover_object(app_definition):
     app_name = validate_app_name(app_definition.get("appName"))
 
@@ -330,6 +371,7 @@ def build_ansirover_object(app_definition):
         "containerHttpPort": to_integer(app_definition.get("containerHttpPort"), "containerHttpPort", 80),
         "notExposeAsWebApp": to_boolean(app_definition.get("notExposeAsWebApp"), "notExposeAsWebApp", False),
         "websocketSupport": to_boolean(app_definition.get("websocketSupport"), "websocketSupport", False),
+        "customDomain": normalize_custom_domains(app_definition.get("customDomain")),
         "tags": normalize_tags(app_definition.get("tags")),
         "httpAuth": normalize_http_auth(app_definition.get("httpAuth")),
         "volumes": normalize_volumes(app_definition.get("volumes")),
@@ -436,6 +478,16 @@ def emit_ansirover_yaml(ansirover_object, app_name):
                     "tags",
                     ansirover_object["tags"],
                     ["tagName"],
+                )
+            )
+            continue
+
+        if field_name == "customDomain":
+            lines.extend(
+                emit_list_of_objects(
+                    "customDomain",
+                    ansirover_object["customDomain"],
+                    ["publicDomain", "hasSsl"],
                 )
             )
             continue
