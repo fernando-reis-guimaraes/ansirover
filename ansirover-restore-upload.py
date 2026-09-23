@@ -50,7 +50,7 @@ def get_swarm_stability_period_seconds():
 
 
 def get_running_swarm_task_ids(server_name, app_name):
-    service_name = get_service_name(app_name)
+    service_name = resolve_service_name(server_name, app_name)
     remote_command = (
         "docker service ps "
         + shlex.quote(service_name)
@@ -102,7 +102,7 @@ def wait_for_swarm_convergence(server_name, app_name, baseline_task_ids):
     poll_seconds = float(os.environ.get("CAPROVER_SWARM_POLL_SECONDS", "2"))
     stability_seconds = get_swarm_stability_period_seconds()
     deadline = time.monotonic() + timeout_seconds
-    service_name = get_service_name(app_name)
+    service_name = resolve_service_name(server_name, app_name)
     candidate_task_ids = None
     stable_since = None
 

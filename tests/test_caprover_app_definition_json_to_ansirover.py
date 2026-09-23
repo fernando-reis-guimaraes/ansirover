@@ -56,7 +56,7 @@ class AnsiRoverExportTests(unittest.TestCase):
     def test_explicit_policy_round_trip_does_not_materialize_defaults(self):
         description = merge_description(
             "Useful human description.",
-            {"restartDelay": "30m"},
+            {"gracePeriod": "5m"},
         )
 
         exported = self.module.build_ansirover_object(
@@ -65,9 +65,9 @@ class AnsiRoverExportTests(unittest.TestCase):
         yaml_text = self.module.emit_ansirover_yaml(exported, "example")
 
         self.assertEqual(exported["description"], "Useful human description.")
-        self.assertEqual(exported["ansirover"], {"restartDelay": "30m"})
-        self.assertIn("ansirover:\n  restartDelay: 30m\n", yaml_text)
-        self.assertNotIn("gracePeriod", yaml_text)
+        self.assertEqual(exported["ansirover"], {"gracePeriod": "5m"})
+        self.assertIn("ansirover:\n  gracePeriod: 5m\n", yaml_text)
+        self.assertNotIn("restartDelay", yaml_text)
         self.assertNotIn("postgresReconnectThreshold", yaml_text)
         self.assertNotIn("postgresPollInterval", yaml_text)
         self.assertNotIn(BEGIN_MARKER, yaml_text)

@@ -34,13 +34,13 @@ class EnvVarTemplateMetadataTests(unittest.TestCase):
     def test_policy_only_metadata_remains_schema_v1(self):
         description = merge_description(
             "Human description.",
-            {"restartDelay": "30m"},
+            {"gracePeriod": "5m"},
         )
         payload = description.split(BEGIN_MARKER, 1)[1].splitlines()[1]
         metadata = decode_metadata_document(payload)
 
         self.assertEqual(metadata["schemaVersion"], 1)
-        self.assertEqual(metadata["ansirover"], {"restartDelay": "30m"})
+        self.assertEqual(metadata["ansirover"], {"gracePeriod": "5m"})
         self.assertEqual(metadata["envVarTemplates"], {})
 
     def test_env_var_templates_use_schema_v2_and_round_trip(self):
@@ -50,7 +50,7 @@ class EnvVarTemplateMetadataTests(unittest.TestCase):
         }
         description = merge_description(
             "Human description.",
-            {"restartDelay": "30m"},
+            {"gracePeriod": "5m"},
             templates,
         )
 
@@ -59,7 +59,7 @@ class EnvVarTemplateMetadataTests(unittest.TestCase):
         metadata = decode_metadata_document(payload)
 
         self.assertEqual(human, "Human description.")
-        self.assertEqual(policy, {"restartDelay": "30m"})
+        self.assertEqual(policy, {"gracePeriod": "5m"})
         self.assertEqual(decoded_templates, templates)
         self.assertEqual(metadata["schemaVersion"], 2)
 

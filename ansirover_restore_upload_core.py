@@ -1053,11 +1053,46 @@ def get_service_name(app_name):
     return "srv-captain--" + app_name
 
 
+_SERVICE_NAME_CACHE: dict[tuple[str, str], str] = {}
+
+
+def resolve_service_name(server_name, app_name):
+    cache_key = (str(server_name), str(app_name))
+    cached_service_name = _SERVICE_NAME_CACHE.get(cache_key)
+
+    if cached_service_name is not None:
+        return cached_service_name
+
+    prefixed_service_name = get_service_name(app_name)
+
+    if is_caprover_url(server_name):
+        _SERVICE_NAME_CACHE[cache_key] = prefixed_service_name
+        return prefixed_service_name
+
+    probe_process = run_remote_command(
+        server_name,
+        "docker service inspect "
+        + shlex.quote(prefixed_service_name)
+        + " --format '{{.ID}}'",
+    )
+
+    if probe_process.returncode == 0 and probe_process.stdout.strip():
+        _SERVICE_NAME_CACHE[cache_key] = prefixed_service_name
+        return prefixed_service_name
+
+    # Some CapRover apps (for example crud-pooler) own a bare service name
+    # without the srv-captain-- prefix. Fall back so post-deploy inspection
+    # targets the service CapRover actually manages.
+    resolved_service_name = str(app_name)
+    _SERVICE_NAME_CACHE[cache_key] = resolved_service_name
+    return resolved_service_name
+
+
 def get_task_state_snapshot(server_name, app_name):
     if is_caprover_url(server_name):
         return set()
 
-    service_name = get_service_name(app_name)
+    service_name = resolve_service_name(server_name, app_name)
     command = (
         "docker service ps "
         + shlex.quote(service_name)
@@ -1075,69 +1110,8 @@ def get_task_state_snapshot(server_name, app_name):
     }
 
 
-def apply_restart_delay(server_name, app_name, restart_delay):
-    if is_caprover_url(server_name):
-        info("[policy] URL target has no SSH context; restart-delay reconciliation skipped.")
-        return
-
-    service_name = get_service_name(app_name)
-    info(f"[policy] Reconciling restart delay to {restart_delay}: {service_name}")
-    command = (
-        "docker service update --detach=true --restart-delay "
-        + shlex.quote(restart_delay)
-        + " "
-        + shlex.quote(service_name)
-    )
-    completed_process = run_remote_command(server_name, command)
-
-    if completed_process.returncode != 0:
-        fail("restart-delay policy reconciliation failed for service: " + service_name)
-
-    inspect_command = (
-        "docker service inspect "
-        + shlex.quote(service_name)
-        + " --format '{{.Spec.TaskTemplate.RestartPolicy.Delay}}'"
-    )
-    inspect_process = run_remote_command(server_name, inspect_command)
-
-    if inspect_process.returncode != 0:
-        fail("could not verify effective restart-delay policy for service: " + service_name)
-
-    effective_restart_delay = inspect_process.stdout.strip()
-
-    try:
-        desired_nanoseconds = round(
-            duration_to_seconds("restartDelay", restart_delay) * 1_000_000_000
-        )
-
-        if effective_restart_delay.isdigit():
-            effective_nanoseconds = int(effective_restart_delay)
-        else:
-            effective_nanoseconds = round(
-                duration_to_seconds("restartDelay", effective_restart_delay)
-                * 1_000_000_000
-            )
-    except AnsiRoverPolicyError as error:
-        fail("could not parse effective restart-delay policy: " + str(error))
-
-    if effective_nanoseconds != desired_nanoseconds:
-        fail(
-            "effective restart-delay policy does not match inventory: requested "
-            + restart_delay
-            + ", live "
-            + effective_restart_delay
-        )
-
-    info(
-        "[policy] restart delay = "
-        + restart_delay
-        + " OK; effective value="
-        + effective_restart_delay
-    )
-
-
 def get_service_replica_counts(server_name, app_name):
-    service_name = get_service_name(app_name)
+    service_name = resolve_service_name(server_name, app_name)
     desired_command = (
         "docker service inspect "
         + shlex.quote(service_name)
@@ -1173,7 +1147,7 @@ def get_service_replica_counts(server_name, app_name):
 
 
 def get_new_failed_tasks(server_name, app_name, baseline_task_ids):
-    service_name = get_service_name(app_name)
+    service_name = resolve_service_name(server_name, app_name)
     command = (
         "docker service ps "
         + shlex.quote(service_name)
@@ -1205,7 +1179,7 @@ def get_new_failed_tasks(server_name, app_name, baseline_task_ids):
 
 
 def print_service_tasks(server_name, app_name):
-    service_name = get_service_name(app_name)
+    service_name = resolve_service_name(server_name, app_name)
     command = "docker service ps " + shlex.quote(service_name) + " --no-trunc"
     completed_process = run_remote_command(server_name, command)
 
@@ -1224,7 +1198,7 @@ def wait_for_swarm_convergence(server_name, app_name, baseline_task_ids):
     timeout_seconds = float(os.environ.get("CAPROVER_SWARM_WAIT_TIMEOUT_SECONDS", "180"))
     poll_seconds = float(os.environ.get("CAPROVER_SWARM_POLL_SECONDS", "2"))
     deadline = time.monotonic() + timeout_seconds
-    service_name = get_service_name(app_name)
+    service_name = resolve_service_name(server_name, app_name)
 
     info(f"[post-deploy] Waiting for Swarm service convergence: {service_name}")
 
@@ -1432,7 +1406,7 @@ def scale_service_to_zero(server_name, app_name):
             "reconnect loop detected but service cannot be quarantined automatically for a URL-only CapRover target"
         )
 
-    service_name = get_service_name(app_name)
+    service_name = resolve_service_name(server_name, app_name)
     info("[post-deploy] QUARANTINE: scaling service to zero: " + service_name)
     command = (
         "docker service update --detach=true --replicas 0 "
@@ -2590,11 +2564,8 @@ def restore_one_app(args, run_post_deploy_checks=True):
         baseline_task_ids = get_task_state_snapshot(args.server_name, args.app_name)
 
     restore_one_app_steps(args)
-    apply_restart_delay(
-        args.server_name,
-        args.app_name,
-        str(effective_policy["restartDelay"]),
-    )
+    # Restart policy is intentionally unmanaged: the Docker/CapRover default
+    # applies and restores never touch Spec.TaskTemplate.RestartPolicy.Delay.
     if skip_checks:
         return
     verify_ansirover_metadata(args, explicit_policy)

@@ -98,7 +98,6 @@ websocketSupport: false
 tags:
   - ansirover-template
 ansirover:
-  restartDelay: 1h
   gracePeriod: 3m
   postgresReconnectThreshold: 3
   postgresPollInterval: 1s

@@ -233,7 +233,7 @@ class CliAndApiTests(unittest.TestCase):
                         "notExposeAsWebApp: false",
                         "websocketSupport: false",
                         "ansirover:",
-                        "  restartDelay: 30m",
+                        "  gracePeriod: 5m",
                         "  postgresReconnectThreshold: 5",
                         "",
                     )
@@ -245,8 +245,33 @@ class CliAndApiTests(unittest.TestCase):
 
         self.assertEqual(
             inventory["ansirover"],
-            {"restartDelay": "30m", "postgresReconnectThreshold": 5},
+            {"gracePeriod": "5m", "postgresReconnectThreshold": 5},
         )
+
+    def test_inventory_parser_rejects_removed_restart_delay(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            app_directory = Path(temporary_directory)
+            (app_directory / "example.yaml").write_text(
+                "\n".join(
+                    (
+                        "appName: example",
+                        "deployedImageName: example/app:latest",
+                        'description: ""',
+                        "hasPersistentData: false",
+                        "instanceCount: 1",
+                        "containerHttpPort: 80",
+                        "notExposeAsWebApp: false",
+                        "websocketSupport: false",
+                        "ansirover:",
+                        "  restartDelay: 30m",
+                        "",
+                    )
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(SystemExit):
+                self.module.load_ansirover_app(app_directory, "example")
 
     def test_legacy_inventory_does_not_materialize_ansirover_policy(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -777,7 +802,9 @@ class PostDeployTests(unittest.TestCase):
 
         self.assertEqual(details, [])
 
-    def test_restart_delay_uses_inventory_policy_and_is_detached(self):
+    def test_service_name_resolves_prefixed_service(self):
+        self.module._SERVICE_NAME_CACHE.clear()
+
         with mock.patch.object(
             self.module,
             "is_caprover_url",
@@ -785,31 +812,25 @@ class PostDeployTests(unittest.TestCase):
         ), mock.patch.object(
             self.module,
             "run_remote_command",
-            side_effect=(
-                subprocess.CompletedProcess(
-                    args=[],
-                    returncode=0,
-                    stdout="",
-                    stderr="",
-                ),
-                subprocess.CompletedProcess(
-                    args=[],
-                    returncode=0,
-                    stdout="30m0s\n",
-                    stderr="",
-                ),
+            return_value=subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout="abc123\n",
+                stderr="",
             ),
         ) as run_remote_command:
-            self.module.apply_restart_delay("storage", "example", "30m")
+            resolved = self.module.resolve_service_name("storage", "prefixed-app")
+            cached = self.module.resolve_service_name("storage", "prefixed-app")
 
-        update_command = run_remote_command.call_args_list[0].args[1]
-        inspect_command = run_remote_command.call_args_list[1].args[1]
-        self.assertIn("--detach=true", update_command)
-        self.assertIn("--restart-delay 30m", update_command)
-        self.assertIn("srv-captain--example", update_command)
-        self.assertIn("RestartPolicy.Delay", inspect_command)
+        self.assertEqual(resolved, "srv-captain--prefixed-app")
+        self.assertEqual(cached, "srv-captain--prefixed-app")
+        self.assertEqual(run_remote_command.call_count, 1)
+        probe_command = run_remote_command.call_args_list[0].args[1]
+        self.assertIn("srv-captain--prefixed-app", probe_command)
 
-    def test_restart_delay_verification_accepts_docker_nanoseconds(self):
+    def test_service_name_falls_back_to_bare_name(self):
+        self.module._SERVICE_NAME_CACHE.clear()
+
         with mock.patch.object(
             self.module,
             "is_caprover_url",
@@ -817,32 +838,35 @@ class PostDeployTests(unittest.TestCase):
         ), mock.patch.object(
             self.module,
             "run_remote_command",
-            side_effect=(
-                subprocess.CompletedProcess([], 0, "", ""),
-                subprocess.CompletedProcess([], 0, "1800000000000\n", ""),
+            return_value=subprocess.CompletedProcess(
+                args=[],
+                returncode=1,
+                stdout="",
+                stderr='Error: No such service: srv-captain--bare-app',
             ),
         ):
-            self.module.apply_restart_delay("storage", "example", "30m")
+            resolved = self.module.resolve_service_name("storage", "bare-app")
 
-    def test_restart_delay_verification_rejects_live_mismatch(self):
+        self.assertEqual(resolved, "bare-app")
+
+    def test_service_name_skips_probe_for_url_targets(self):
+        self.module._SERVICE_NAME_CACHE.clear()
+
         with mock.patch.object(
             self.module,
             "is_caprover_url",
-            return_value=False,
+            return_value=True,
         ), mock.patch.object(
             self.module,
             "run_remote_command",
-            side_effect=(
-                subprocess.CompletedProcess([], 0, "", ""),
-                subprocess.CompletedProcess([], 0, "1h0m0s\n", ""),
-            ),
-        ), mock.patch.object(
-            self.module,
-            "fail",
-            side_effect=RuntimeError,
-        ):
-            with self.assertRaises(RuntimeError):
-                self.module.apply_restart_delay("storage", "example", "30m")
+        ) as run_remote_command:
+            resolved = self.module.resolve_service_name(
+                "https://captain.example.test",
+                "url-app",
+            )
+
+        self.assertEqual(resolved, "srv-captain--url-app")
+        run_remote_command.assert_not_called()
 
     def test_wait_for_swarm_convergence_fails_on_new_failed_task(self):
         with mock.patch.object(
@@ -1009,9 +1033,6 @@ class PostDeployTests(unittest.TestCase):
             "verify_live_env_drift",
         ) as verify_drift, mock.patch.object(
             self.module,
-            "apply_restart_delay",
-        ) as apply_restart_delay, mock.patch.object(
-            self.module,
             "verify_ansirover_metadata",
         ) as verify_metadata, mock.patch.object(
             self.module,
@@ -1024,12 +1045,11 @@ class PostDeployTests(unittest.TestCase):
 
         restore.assert_called_once_with(args)
         verify_drift.assert_called_once_with(args)
-        apply_restart_delay.assert_called_once_with("storage", "example", "1h")
         verify_metadata.assert_called_once_with(args, {})
         wait_for_convergence.assert_not_called()
         monitor_reconnects.assert_not_called()
 
-    def test_fast_all_restore_still_applies_explicit_restart_delay(self):
+    def test_fast_all_restore_still_verifies_explicit_policy(self):
         args = mock.Mock(
             server_name="storage",
             app_name="example",
@@ -1040,7 +1060,7 @@ class PostDeployTests(unittest.TestCase):
         with mock.patch.object(
             self.module,
             "load_ansirover_app",
-            return_value={"ansirover": {"restartDelay": "30m"}},
+            return_value={"ansirover": {"gracePeriod": "5m"}},
         ), mock.patch.object(
             self.module,
             "preflight_postgres",
@@ -1049,9 +1069,6 @@ class PostDeployTests(unittest.TestCase):
             "restore_one_app_steps",
         ), mock.patch.object(
             self.module,
-            "apply_restart_delay",
-        ) as apply_restart_delay, mock.patch.object(
-            self.module,
             "verify_ansirover_metadata",
         ) as verify_metadata, mock.patch.object(
             self.module,
@@ -1059,8 +1076,7 @@ class PostDeployTests(unittest.TestCase):
         ) as verify_drift:
             self.module.restore_one_app(args, run_post_deploy_checks=False)
 
-        apply_restart_delay.assert_called_once_with("storage", "example", "30m")
-        verify_metadata.assert_called_once_with(args, {"restartDelay": "30m"})
+        verify_metadata.assert_called_once_with(args, {"gracePeriod": "5m"})
         verify_drift.assert_called_once_with(args)
 
     def test_all_mode_post_deploy_checks_are_disabled_by_default(self):

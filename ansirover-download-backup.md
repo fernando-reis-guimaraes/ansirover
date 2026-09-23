@@ -210,7 +210,7 @@ Explicit app policy stored in CapRover description metadata is decoded into the 
 
 ```yaml
 ansirover:
-  restartDelay: 30m
+  gracePeriod: 3m
 ```
 
 The technical metadata block is removed from the exported human `description`. Only explicitly stored fields are emitted, so runtime defaults do not appear in an inventory that omitted them. A legacy app with no AnsiRover metadata continues to export without an `ansirover` section.

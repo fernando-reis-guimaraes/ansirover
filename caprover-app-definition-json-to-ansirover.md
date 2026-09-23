@@ -25,7 +25,7 @@ appName: xpto
 deployedImageName: registry.example.com/captain/img-captain-xpto:1
 description: ""
 ansirover:
-  restartDelay: 30m
+  gracePeriod: 3m
 hasPersistentData: false
 instanceCount: 1
 containerHttpPort: 80

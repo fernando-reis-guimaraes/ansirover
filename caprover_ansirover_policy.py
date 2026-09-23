@@ -16,15 +16,17 @@ BEGIN_MARKER = "# ANSIROVER-BEGIN #"
 END_MARKER = "# ANSIROVER-END #"
 
 POLICY_KEYS = (
-    "restartDelay",
     "swarmStabilityPeriod",
     "gracePeriod",
     "postgresReconnectThreshold",
     "postgresPollInterval",
 )
 
+REMOVED_POLICY_KEYS = (
+    "restartDelay",
+)
+
 DEFAULT_POLICY = {
-    "restartDelay": "1h",
     "swarmStabilityPeriod": "15s",
     "gracePeriod": "3m",
     "postgresReconnectThreshold": 3,
@@ -82,6 +84,16 @@ def validate_explicit_policy(policy: object | None) -> dict[str, object]:
 
     if not isinstance(policy, Mapping):
         raise AnsiRoverPolicyError("ansirover must be an object")
+
+    removed_keys = sorted(set(policy) & set(REMOVED_POLICY_KEYS))
+
+    if removed_keys:
+        raise AnsiRoverPolicyError(
+            "ansirover."
+            + removed_keys[0]
+            + " was removed; the Docker/CapRover default restart policy now applies. "
+            + "Remove the field from the inventory."
+        )
 
     unknown_keys = sorted(set(policy) - set(POLICY_KEYS))
 
@@ -225,6 +237,13 @@ def decode_metadata_document(payload: str) -> dict[str, object]:
 
     if not isinstance(metadata_policy, Mapping):
         raise AnsiRoverPolicyError("AnsiRover metadata ansirover field must be an object")
+
+    # Legacy restartDelay entries written by older tool versions are ignored.
+    # The Docker/CapRover default restart policy applies and the field
+    # converges away on the next restore.
+    metadata_policy = {
+        key: value for key, value in metadata_policy.items() if key != "restartDelay"
+    }
 
     explicit_policy = validate_explicit_policy(metadata_policy)
     templates = validate_env_var_templates(document.get("envVarTemplates"))

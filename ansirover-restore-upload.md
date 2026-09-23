@@ -171,7 +171,6 @@ The inventory YAML may contain:
 
 ```yaml
 ansirover:
-  restartDelay: 1h
   gracePeriod: 3m
   postgresReconnectThreshold: 3
   postgresPollInterval: 1s
@@ -182,15 +181,16 @@ The mapping is optional. Unknown fields and invalid values fail validation. Dura
 Runtime defaults are:
 
 ```text
-restartDelay               1h
 gracePeriod                3m
 postgresReconnectThreshold 3
 postgresPollInterval       1s
 ```
 
-Defaults affect runtime behavior but are not materialized into downloaded YAML. Review `restartDelay` per app: one hour may be useful for a noncritical administration tool but dangerous for a critical application.
+Defaults affect runtime behavior but are not materialized into downloaded YAML.
 
-`restartDelay` controls `Spec.TaskTemplate.RestartPolicy.Delay`. The other three fields configure the bounded PostgreSQL reconnect observation after Swarm convergence. The reconnect guard tracks connection generations rather than raw new-session counts. Initial connection establishment, pure pool expansion, and partial pool churn with at least one surviving prior session do not count as reconnect waves. A reconnect wave requires a previously observed connection generation to be fully replaced, either directly or after a full disconnect.
+Restart policy is intentionally unmanaged: restores never touch `Spec.TaskTemplate.RestartPolicy.Delay` and the Docker/CapRover default applies. An inventory that still declares `ansirover.restartDelay` fails validation with a removal notice; persisted metadata written by older tool versions ignores the legacy field and converges away on the next restore.
+
+The three policy fields configure the bounded PostgreSQL reconnect observation after Swarm convergence. The reconnect guard tracks connection generations rather than raw new-session counts. Initial connection establishment, pure pool expansion, and partial pool churn with at least one surviving prior session do not count as reconnect waves. A reconnect wave requires a previously observed connection generation to be fully replaced, either directly or after a full disconnect.
 
 Explicit policy is stored in the CapRover description as internal versioned metadata. Human description text is preserved. The metadata contains only policy fields and never environment values or credentials.
 

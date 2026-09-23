@@ -28,19 +28,38 @@ class AnsiRoverPolicyTest(unittest.TestCase):
         self.assertEqual(duration_to_seconds("swarmStabilityPeriod", "15s"), 15.0)
 
     def test_effective_policy_uses_defaults_without_materializing_them(self):
-        explicit = {"restartDelay": "30m"}
+        explicit = {"gracePeriod": "5m"}
 
         self.assertEqual(validate_explicit_policy(explicit), explicit)
         self.assertEqual(
             get_effective_policy(explicit),
             {
-                "restartDelay": "30m",
                 "swarmStabilityPeriod": "15s",
-                "gracePeriod": "3m",
+                "gracePeriod": "5m",
                 "postgresReconnectThreshold": 3,
                 "postgresPollInterval": "1s",
             },
         )
+
+    def test_removed_restart_delay_is_rejected(self):
+        with self.assertRaises(AnsiRoverPolicyError):
+            validate_explicit_policy({"restartDelay": "30m"})
+
+        with self.assertRaises(AnsiRoverPolicyError):
+            encode_metadata({"restartDelay": "30m"})
+
+    def test_legacy_restart_delay_metadata_is_ignored(self):
+        payload = base64.b64encode(
+            b'{"schemaVersion":1,"ansirover":{"restartDelay":"1h","gracePeriod":"3m"}}'
+        ).decode("ascii")
+
+        self.assertEqual(decode_metadata(payload), {"gracePeriod": "3m"})
+
+        legacy_only = base64.b64encode(
+            b'{"schemaVersion":1,"ansirover":{"restartDelay":"1h"}}'
+        ).decode("ascii")
+
+        self.assertEqual(decode_metadata(legacy_only), {})
 
     def test_swarm_stability_period_is_valid_explicit_policy(self):
         explicit = {"swarmStabilityPeriod": "30s"}
@@ -50,7 +69,7 @@ class AnsiRoverPolicyTest(unittest.TestCase):
 
     def test_metadata_round_trip_preserves_only_explicit_values(self):
         explicit = {
-            "restartDelay": "30m",
+            "gracePeriod": "5m",
             "postgresReconnectThreshold": 5,
         }
 
@@ -62,7 +81,7 @@ class AnsiRoverPolicyTest(unittest.TestCase):
     def test_metadata_is_compact_deterministic_json_in_canonical_base64(self):
         explicit = {
             "postgresPollInterval": "2s",
-            "restartDelay": "1h",
+            "gracePeriod": "5m",
         }
 
         payload = encode_metadata(explicit)
@@ -70,14 +89,14 @@ class AnsiRoverPolicyTest(unittest.TestCase):
 
         self.assertEqual(
             decoded,
-            '{"schemaVersion":1,"ansirover":{"restartDelay":"1h","postgresPollInterval":"2s"}}',
+            '{"schemaVersion":1,"ansirover":{"gracePeriod":"5m","postgresPollInterval":"2s"}}',
         )
         self.assertEqual(json.loads(decoded)["schemaVersion"], 1)
 
     def test_description_round_trip_preserves_human_text(self):
         explicit = {
-            "restartDelay": "1h",
             "gracePeriod": "3m",
+            "postgresReconnectThreshold": 5,
         }
         description = merge_description("Human description.", explicit)
 
@@ -94,20 +113,20 @@ class AnsiRoverPolicyTest(unittest.TestCase):
         self.assertEqual(split_description(""), ("", {}))
 
     def test_replacing_metadata_does_not_duplicate_markers(self):
-        first = merge_description("Human description.", {"restartDelay": "1h"})
-        second = merge_description(first, {"restartDelay": "30m"})
+        first = merge_description("Human description.", {"gracePeriod": "3m"})
+        second = merge_description(first, {"gracePeriod": "5m"})
 
         self.assertEqual(second.count(BEGIN_MARKER), 1)
         self.assertEqual(second.count(END_MARKER), 1)
-        self.assertEqual(split_description(second)[1], {"restartDelay": "30m"})
+        self.assertEqual(split_description(second)[1], {"gracePeriod": "5m"})
 
     def test_empty_policy_removes_metadata_block(self):
-        description = merge_description("Human description.", {"restartDelay": "1h"})
+        description = merge_description("Human description.", {"gracePeriod": "3m"})
 
         self.assertEqual(merge_description(description, {}), "Human description.")
 
     def test_duplicate_markers_are_rejected(self):
-        payload = encode_metadata({"restartDelay": "1h"})
+        payload = encode_metadata({"gracePeriod": "3m"})
         description = "\n".join(
             (
                 BEGIN_MARKER,
@@ -134,7 +153,7 @@ class AnsiRoverPolicyTest(unittest.TestCase):
 
     def test_unknown_schema_version_is_rejected(self):
         payload = base64.b64encode(
-            b'{"schemaVersion":3,"ansirover":{"restartDelay":"1h"}}'
+            b'{"schemaVersion":3,"ansirover":{"gracePeriod":"3m"}}'
         ).decode("ascii")
 
         with self.assertRaises(AnsiRoverPolicyError):
@@ -145,7 +164,7 @@ class AnsiRoverPolicyTest(unittest.TestCase):
             with self.subTest(schema_version=schema_version):
                 document = {
                     "schemaVersion": schema_version,
-                    "ansirover": {"restartDelay": "1h"},
+                    "ansirover": {"gracePeriod": "3m"},
                 }
                 payload = base64.b64encode(
                     json.dumps(document).encode("utf-8")
