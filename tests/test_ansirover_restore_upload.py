@@ -1125,6 +1125,69 @@ class PostDeployTests(unittest.TestCase):
         verify_metadata.assert_called_once_with(args, {"gracePeriod": "5m"})
         verify_drift.assert_called_once_with(args)
 
+    def test_post_deploy_baseline_is_captured_after_final_config(self):
+        args = mock.Mock(
+            server_name="storage",
+            app_name="example",
+            path="/tmp/example",
+            wait_deploy=True,
+        )
+        call_order = []
+
+        def record(name):
+            def side_effect(*_args, **_kwargs):
+                call_order.append(name)
+                if name == "snapshot":
+                    return {"old-task"}
+                return None
+            return side_effect
+
+        with mock.patch.dict(
+            os.environ,
+            {"STORAGE_CAPTAIN_PASSWORD": "test-secret"},
+            clear=False,
+        ), mock.patch.object(
+            self.module,
+            "load_ansirover_app",
+            return_value={"ansirover": {}},
+        ), mock.patch.object(
+            self.module,
+            "preflight_postgres",
+        ), mock.patch.object(
+            self.module,
+            "get_task_state_snapshot",
+            side_effect=record("snapshot"),
+        ) as snapshot, mock.patch.object(
+            self.module,
+            "restore_one_app_steps",
+            side_effect=record("steps"),
+        ), mock.patch.object(
+            self.module,
+            "verify_ansirover_metadata",
+            side_effect=record("metadata"),
+        ), mock.patch.object(
+            self.module,
+            "verify_live_env_drift",
+            side_effect=record("drift"),
+        ), mock.patch.object(
+            self.module,
+            "wait_for_swarm_convergence",
+            side_effect=record("convergence"),
+        ) as wait_for_convergence, mock.patch.object(
+            self.module,
+            "monitor_post_deploy_postgres_reconnects",
+        ):
+            self.module.restore_one_app(args)
+
+        snapshot.assert_called_once_with("storage", "example")
+        wait_for_convergence.assert_called_once_with(
+            "storage", "example", {"old-task"}
+        )
+        self.assertEqual(
+            call_order,
+            ["steps", "metadata", "drift", "snapshot", "convergence"],
+        )
+
     def test_all_mode_post_deploy_checks_are_disabled_by_default(self):
         with mock.patch.dict(os.environ, {}, clear=True):
             self.assertFalse(self.module.should_run_all_post_deploy_checks())

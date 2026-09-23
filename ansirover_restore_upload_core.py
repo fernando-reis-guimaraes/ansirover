@@ -2575,9 +2575,6 @@ def restore_one_app(args, run_post_deploy_checks=True):
 
     baseline_task_ids = set()
 
-    if run_post_deploy_checks and not skip_checks:
-        baseline_task_ids = get_task_state_snapshot(args.server_name, args.app_name)
-
     restore_one_app_steps(args)
     # Restart policy is intentionally unmanaged: the Docker/CapRover default
     # applies and restores never touch Spec.TaskTemplate.RestartPolicy.Delay.
@@ -2592,6 +2589,10 @@ def restore_one_app(args, run_post_deploy_checks=True):
     if not args.wait_deploy:
         info("[guardrails] --no-wait selected; post-deploy checks skipped because deploy is still asynchronous.")
         return
+
+    if run_post_deploy_checks and not skip_checks:
+        baseline_task_ids = get_task_state_snapshot(args.server_name, args.app_name)
+        info("[post-deploy] Swarm baseline captured after final config; intermediate restore churn is excluded.")
 
     info("[guardrails] Running post-deploy verification...")
     wait_for_swarm_convergence(args.server_name, args.app_name, baseline_task_ids)
