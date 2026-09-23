@@ -111,4 +111,4 @@ An unavailable mapping, a cancelled prompt, a bad password, or a non-APR1 hash f
 - SSH access to the target CapRover host is required.
 - `curl` must be available locally.
 - `openssl` must be available locally when an APR1 password must be prompted for and verified.
-- `<SERVER>_CAPTAIN_PASSWORD` is used when present; otherwise the saved CapRover CLI login is used.
+- `<SERVER>_CAPTAIN_PASSWORD` is required; the command fails before any work when it is not set.

@@ -61,6 +61,24 @@ def get_captain_password_env_name(server_name):
     return f"{normalized}_CAPTAIN_PASSWORD"
 
 
+def require_captain_password(server_name):
+    if is_caprover_url(server_name):
+        password = os.environ.get("CAPROVER_PASSWORD", "")
+
+        if not password:
+            fail("CAPROVER_PASSWORD is required when the server target is a CapRover URL")
+
+        return password
+
+    env_name = get_captain_password_env_name(server_name)
+    password = os.environ.get(env_name, "")
+
+    if not password:
+        fail(f"CapRover password env var is required but not set: {env_name}")
+
+    return password
+
+
 def validate_simple_name(label, value):
     if not value:
         fail(f"{label} is required")
@@ -315,23 +333,17 @@ def run_caprover_api(server_name, api_path, method, data):
     ]
 
     if is_caprover_url(server_name):
-        password = os.environ.get("CAPROVER_PASSWORD", "")
-
-        if not password:
-            fail("CAPROVER_PASSWORD is required when the server target is a CapRover URL")
+        password = require_captain_password(server_name)
 
         info("[caprover api] Using URL target with CAPROVER_PASSWORD.")
         command.extend(["--caproverUrl", server_name, "-p", password])
     else:
         command.extend(["--caproverName", server_name])
         env_name = get_captain_password_env_name(server_name)
-        password = os.environ.get(env_name, "")
+        password = require_captain_password(server_name)
 
-        if password:
-            info(f"[caprover api] Using password from environment variable: {env_name}")
-            command.extend(["-p", password])
-        else:
-            info(f"[caprover api] Password env var not set: {env_name}. Using CapRover CLI saved login/config.")
+        info(f"[caprover api] Using password from environment variable: {env_name}")
+        command.extend(["-p", password])
 
     command.extend(
         [
@@ -2398,6 +2410,7 @@ def restore_one_app_steps(args):
     app_dir = Path(args.path).expanduser().resolve()
 
     validate_server_target(server_name)
+    require_captain_password(server_name)
     validate_simple_name("app name", app_name)
     validate_server_mode_options(
         server_name=server_name,
@@ -2547,6 +2560,8 @@ def restore_one_app_steps(args):
 
 
 def restore_one_app(args, run_post_deploy_checks=True):
+    validate_server_target(args.server_name)
+    require_captain_password(args.server_name)
     ansirover = load_ansirover_app(get_app_dir(args), args.app_name)
     explicit_policy = ansirover.get("ansirover", {})
     effective_policy = get_effective_policy(explicit_policy)
@@ -2837,6 +2852,7 @@ def restore_all_apps(args):
     base_dir = Path(args.path).expanduser().resolve()
 
     validate_server_target(server_name)
+    require_captain_password(server_name)
     validate_server_mode_options(
         server_name=server_name,
         with_image=args.with_image,
@@ -3077,6 +3093,9 @@ def infer_app_name_from_current_folder(args):
 
 def main():
     args = parse_args()
+
+    validate_server_target(args.server_name)
+    require_captain_password(args.server_name)
 
     if args.app_name is None:
         infer_app_name_from_current_folder(args)

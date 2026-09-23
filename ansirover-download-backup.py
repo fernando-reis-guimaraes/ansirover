@@ -70,6 +70,16 @@ def get_captain_password_env_name(server_name):
     return f"{normalized}_CAPTAIN_PASSWORD"
 
 
+def require_captain_password(server_name):
+    env_name = get_captain_password_env_name(server_name)
+    password = os.environ.get(env_name, "")
+
+    if not password:
+        fail(f"CapRover password env var is required but not set: {env_name}")
+
+    return password
+
+
 def validate_simple_name(label, value):
     if not value:
         fail(f"{label} is required")
@@ -129,13 +139,10 @@ def run_caprover_api(server_name, api_path, method, data):
     ]
 
     env_name = get_captain_password_env_name(server_name)
-    password = os.environ.get(env_name, "")
+    password = require_captain_password(server_name)
 
-    if password:
-        info(f"[caprover api] Using password from environment variable: {env_name}")
-        base_command.extend(["-p", password])
-    else:
-        info(f"[caprover api] Password env var not set: {env_name}. Using CapRover CLI saved login/config.")
+    info(f"[caprover api] Using password from environment variable: {env_name}")
+    base_command.extend(["-p", password])
 
     max_attempts = get_max_attempts()
     last_error = ""
@@ -654,10 +661,11 @@ def infer_target_from_current_folder(args):
 def main():
     args = parse_args()
 
+    validate_caprover_machine_name(args.server_name)
+    require_captain_password(args.server_name)
+
     if args.target is None:
         infer_target_from_current_folder(args)
-
-    validate_caprover_machine_name(args.server_name)
 
     global CURRENT_APP_NAME
 

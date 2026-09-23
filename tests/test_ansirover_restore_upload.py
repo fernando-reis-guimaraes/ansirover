@@ -167,6 +167,44 @@ class CliAndApiTests(unittest.TestCase):
         run.assert_not_called()
 
     @mock.patch("subprocess.run")
+    def test_name_api_requires_captain_password(self, run):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(SystemExit):
+                self.module.run_caprover_api(
+                    "storage",
+                    "/user/system/info",
+                    "GET",
+                    {},
+                )
+
+        run.assert_not_called()
+
+    def test_require_captain_password_fails_fast_for_machine_name(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(SystemExit):
+                self.module.require_captain_password("srv1")
+
+    def test_restore_one_app_fails_before_any_work_without_password(self):
+        args = mock.Mock(
+            server_name="srv1",
+            app_name="example",
+            path="/tmp/example",
+        )
+
+        with mock.patch.dict(os.environ, {}, clear=True), mock.patch.object(
+            self.module,
+            "load_ansirover_app",
+        ) as load_app, mock.patch.object(
+            self.module,
+            "preflight_postgres",
+        ) as preflight:
+            with self.assertRaises(SystemExit):
+                self.module.restore_one_app(args)
+
+        load_app.assert_not_called()
+        preflight.assert_not_called()
+
+    @mock.patch("subprocess.run")
     def test_image_preflight_pulls_image_on_destination_server(self, run):
         run.return_value = subprocess.CompletedProcess(
             args=[],
@@ -1014,7 +1052,11 @@ class PostDeployTests(unittest.TestCase):
             wait_deploy=False,
         )
 
-        with mock.patch.object(
+        with mock.patch.dict(
+            os.environ,
+            {"STORAGE_CAPTAIN_PASSWORD": "test-secret"},
+            clear=False,
+        ), mock.patch.object(
             self.module,
             "load_ansirover_app",
             return_value={"ansirover": {}},
@@ -1057,7 +1099,11 @@ class PostDeployTests(unittest.TestCase):
             wait_deploy=True,
         )
 
-        with mock.patch.object(
+        with mock.patch.dict(
+            os.environ,
+            {"STORAGE_CAPTAIN_PASSWORD": "test-secret"},
+            clear=False,
+        ), mock.patch.object(
             self.module,
             "load_ansirover_app",
             return_value={"ansirover": {"gracePeriod": "5m"}},

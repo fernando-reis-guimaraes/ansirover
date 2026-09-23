@@ -41,6 +41,16 @@ def get_captain_password_env_name(server_name):
     return f"{normalized}_CAPTAIN_PASSWORD"
 
 
+def require_captain_password(server_name):
+    env_name = get_captain_password_env_name(server_name)
+    password = os.environ.get(env_name, "")
+
+    if not password:
+        fail(f"CapRover password env var is required but not set: {env_name}")
+
+    return password
+
+
 def validate_simple_name(label, value):
     if not value:
         fail(f"{label} must not be empty")
@@ -95,13 +105,10 @@ def run_caprover_api(server_name, api_path, method, data, allowed_statuses, retu
     ]
 
     env_name = get_captain_password_env_name(server_name)
-    password = os.environ.get(env_name, "")
+    password = require_captain_password(server_name)
 
-    if password:
-        info(f"[caprover api] Using password from environment variable: {env_name}")
-        command.extend(["-p", password])
-    else:
-        info(f"[caprover api] Password env var not set: {env_name}. Using CapRover CLI saved login/config.")
+    info(f"[caprover api] Using password from environment variable: {env_name}")
+    command.extend(["-p", password])
 
     with tempfile.NamedTemporaryFile(prefix="caprover-api-", suffix=".json", delete=False) as output_file:
         output_path = output_file.name
@@ -622,6 +629,7 @@ def main():
     args = parse_args()
 
     validate_caprover_machine_name(args.server_name)
+    require_captain_password(args.server_name)
     validate_simple_name("app name", args.app_name)
 
     current_dir = Path.cwd()

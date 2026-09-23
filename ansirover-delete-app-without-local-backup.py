@@ -24,6 +24,16 @@ def password_env_name(server_name):
     return f"{normalized}_CAPTAIN_PASSWORD"
 
 
+def require_captain_password(server_name):
+    env_name = password_env_name(server_name)
+    password = os.environ.get(env_name, "")
+
+    if not password:
+        fail(f"CapRover password env var is required but not set: {env_name}")
+
+    return password
+
+
 def validate_caprover_machine_name(server_name):
     if not server_name:
         fail("server name must not be empty")
@@ -84,10 +94,9 @@ def delete_app(server_name, app_name):
         "--data",
         json.dumps({"volumes": [], "appNames": [app_name]}, separators=(",", ":")),
     ]
-    password = os.environ.get(password_env_name(server_name))
+    password = require_captain_password(server_name)
 
-    if password:
-        command.extend(["-p", password])
+    command.extend(["-p", password])
 
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as output_file:
         output_path = Path(output_file.name)
@@ -115,6 +124,7 @@ def main():
         fail("app name must not be empty")
 
     validate_caprover_machine_name(args.server_name)
+    require_captain_password(args.server_name)
 
     if not args.force:
         confirm(args.server_name, args.app_name)
