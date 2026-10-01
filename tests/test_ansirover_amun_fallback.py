@@ -121,27 +121,26 @@ class CaptainPasswordAmunFallbackTests(unittest.TestCase):
             clear=True,
         ):
             with mock.patch.object(
-                self.module, "amun_secret_exists", side_effect=AssertionError("must not check amun")
+                self.module, "fetch_amun_secret", side_effect=AssertionError("must not check amun")
             ):
                 self.assertEqual(self.module.require_captain_password("srv1"), "from-env")
 
     def test_missing_password_falls_back_to_amun_with_warning(self):
         with mock.patch.dict(os.environ, {}, clear=True):
-            with mock.patch.object(self.module, "amun_secret_exists", return_value=True):
-                with mock.patch.object(
-                    self.module, "fetch_amun_secret", return_value=("amun-secret", None)
-                ):
-                    stderr = io.StringIO()
-                    with redirect_stderr(stderr):
-                        value = self.module.require_captain_password("srv1")
-                    self.assertEqual(value, "amun-secret")
-                    # The fetched secret is cached into the process environment.
-                    self.assertEqual(os.environ.get("SRV1_CAPTAIN_PASSWORD"), "amun-secret")
-                    output = stderr.getvalue()
-                    self.assertIn("SRV1_CAPTAIN_PASSWORD", output)
-                    self.assertIn("Secure Enclave", output)
-                    self.assertIn("Touch ID", output)
-                    self.assertNotIn("amun-secret", output)
+            with mock.patch.object(
+                self.module, "fetch_amun_secret", return_value=("amun-secret", None)
+            ):
+                stderr = io.StringIO()
+                with redirect_stderr(stderr):
+                    value = self.module.require_captain_password("srv1")
+                self.assertEqual(value, "amun-secret")
+                # The fetched secret is cached into the process environment.
+                self.assertEqual(os.environ.get("SRV1_CAPTAIN_PASSWORD"), "amun-secret")
+                output = stderr.getvalue()
+                self.assertIn("SRV1_CAPTAIN_PASSWORD", output)
+                self.assertIn("Secure Enclave", output)
+                self.assertIn("Touch ID", output)
+                self.assertNotIn("amun-secret", output)
 
     def test_missing_password_still_fails_when_amun_has_no_secret(self):
         with mock.patch.dict(os.environ, {"ANSIROVER_DISABLE_AMUN": "1"}, clear=True):
@@ -150,17 +149,16 @@ class CaptainPasswordAmunFallbackTests(unittest.TestCase):
 
     def test_url_mode_falls_back_to_amun(self):
         with mock.patch.dict(os.environ, {}, clear=True):
-            with mock.patch.object(self.module, "amun_secret_exists", return_value=True):
-                with mock.patch.object(
-                    self.module, "fetch_amun_secret", return_value=("url-secret", None)
-                ):
-                    stderr = io.StringIO()
-                    with redirect_stderr(stderr):
-                        value = self.module.require_captain_password("https://captain.example.com")
-                    self.assertEqual(value, "url-secret")
-                    output = stderr.getvalue()
-                    self.assertIn("CAPROVER_PASSWORD", output)
-                    self.assertIn("Secure Enclave", output)
+            with mock.patch.object(
+                self.module, "fetch_amun_secret", return_value=("url-secret", None)
+            ):
+                stderr = io.StringIO()
+                with redirect_stderr(stderr):
+                    value = self.module.require_captain_password("https://captain.example.com")
+                self.assertEqual(value, "url-secret")
+                output = stderr.getvalue()
+                self.assertIn("CAPROVER_PASSWORD", output)
+                self.assertIn("Secure Enclave", output)
 
 
 class EnvVarTemplateAmunFallbackTests(unittest.TestCase):
@@ -185,25 +183,24 @@ class EnvVarTemplateAmunFallbackTests(unittest.TestCase):
 
     def test_missing_template_variable_falls_back_to_amun(self):
         with mock.patch.dict(os.environ, {}, clear=True):
-            with mock.patch.object(self.module, "amun_secret_exists", return_value=True):
-                with mock.patch.object(
-                    self.module, "fetch_amun_secret", return_value=("amun-value", None)
-                ):
-                    stderr = io.StringIO()
-                    with redirect_stderr(stderr):
-                        env_vars, templates = self.parse("VALUE=${MYSECRET}\n", {})
-                    self.assertEqual(env_vars, [{"key": "VALUE", "value": "amun-value"}])
-                    self.assertEqual(templates, {"VALUE": "${MYSECRET}"})
-                    output = stderr.getvalue()
-                    self.assertIn("MYSECRET", output)
-                    self.assertIn("Secure Enclave", output)
-                    self.assertIn("Touch ID", output)
-                    self.assertNotIn("amun-value", output)
+            with mock.patch.object(
+                self.module, "fetch_amun_secret", return_value=("amun-value", None)
+            ):
+                stderr = io.StringIO()
+                with redirect_stderr(stderr):
+                    env_vars, templates = self.parse("VALUE=${MYSECRET}\n", {})
+                self.assertEqual(env_vars, [{"key": "VALUE", "value": "amun-value"}])
+                self.assertEqual(templates, {"VALUE": "${MYSECRET}"})
+                output = stderr.getvalue()
+                self.assertIn("MYSECRET", output)
+                self.assertIn("Secure Enclave", output)
+                self.assertIn("Touch ID", output)
+                self.assertNotIn("amun-value", output)
 
     def test_present_empty_variable_does_not_touch_amun(self):
         with mock.patch.dict(os.environ, {}, clear=True):
             with mock.patch.object(
-                self.module, "amun_secret_exists", side_effect=AssertionError("must not check amun")
+                self.module, "fetch_amun_secret", side_effect=AssertionError("must not check amun")
             ):
                 env_vars, _ = self.parse("VALUE=prefix-${EMPTY}-suffix\n", {"EMPTY": ""})
                 self.assertEqual(env_vars, [{"key": "VALUE", "value": "prefix--suffix"}])
@@ -215,10 +212,9 @@ class EnvVarTemplateAmunFallbackTests(unittest.TestCase):
 
     def test_empty_amun_value_is_valid_for_templates(self):
         with mock.patch.dict(os.environ, {}, clear=True):
-            with mock.patch.object(self.module, "amun_secret_exists", return_value=True):
-                with mock.patch.object(self.module, "fetch_amun_secret", return_value=("", None)):
-                    env_vars, _ = self.parse("VALUE=prefix-${EMPTY}-suffix\n", {})
-                    self.assertEqual(env_vars, [{"key": "VALUE", "value": "prefix--suffix"}])
+            with mock.patch.object(self.module, "fetch_amun_secret", return_value=("", None)):
+                env_vars, _ = self.parse("VALUE=prefix-${EMPTY}-suffix\n", {})
+                self.assertEqual(env_vars, [{"key": "VALUE", "value": "prefix--suffix"}])
 
 
 if __name__ == "__main__":

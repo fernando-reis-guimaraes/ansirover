@@ -18,7 +18,6 @@ from urllib.parse import parse_qs, unquote, urlparse
 from caprover_ansirover_policy import (
     AnsiRoverPolicyError,
     BEGIN_MARKER,
-    amun_secret_exists,
     duration_to_seconds,
     fetch_amun_secret,
     get_effective_policy,
@@ -70,23 +69,22 @@ def require_captain_password(server_name):
         if password:
             return password
 
-        if amun_secret_exists("CAPROVER_PASSWORD"):
+        info(
+            "[config] Environment variable CAPROVER_PASSWORD is not set; "
+            "reading secret 'CAPROVER_PASSWORD' from Secure Enclave "
+            "via amun-keychain-secrets (Touch ID/passcode prompt required)..."
+        )
+        secret_value, secret_error = fetch_amun_secret("CAPROVER_PASSWORD")
+
+        if secret_value:
             info(
-                "[config] Environment variable CAPROVER_PASSWORD is not set; "
-                "reading secret 'CAPROVER_PASSWORD' from Secure Enclave "
-                "via amun-keychain-secrets (Touch ID/passcode prompt required)..."
+                "[config] Using secret from Secure Enclave via amun-keychain-secrets: CAPROVER_PASSWORD"
             )
-            secret_value, secret_error = fetch_amun_secret("CAPROVER_PASSWORD")
+            os.environ["CAPROVER_PASSWORD"] = secret_value
+            return secret_value
 
-            if secret_value:
-                info(
-                    "[config] Using secret from Secure Enclave via amun-keychain-secrets: CAPROVER_PASSWORD"
-                )
-                os.environ["CAPROVER_PASSWORD"] = secret_value
-                return secret_value
-
-            if secret_error:
-                info(f"[config] Secure Enclave lookup failed for CAPROVER_PASSWORD: {secret_error}")
+        if secret_error:
+            info(f"[config] Secure Enclave lookup failed for CAPROVER_PASSWORD: {secret_error}")
 
         fail("CAPROVER_PASSWORD is required when the server target is a CapRover URL")
 
@@ -96,23 +94,22 @@ def require_captain_password(server_name):
     if password:
         return password
 
-    if amun_secret_exists(env_name):
+    info(
+        f"[config] Environment variable {env_name} is not set; "
+        f"reading secret '{env_name}' from Secure Enclave "
+        "via amun-keychain-secrets (Touch ID/passcode prompt required)..."
+    )
+    secret_value, secret_error = fetch_amun_secret(env_name)
+
+    if secret_value:
         info(
-            f"[config] Environment variable {env_name} is not set; "
-            f"reading secret '{env_name}' from Secure Enclave "
-            "via amun-keychain-secrets (Touch ID/passcode prompt required)..."
+            f"[config] Using secret from Secure Enclave via amun-keychain-secrets: {env_name}"
         )
-        secret_value, secret_error = fetch_amun_secret(env_name)
+        os.environ[env_name] = secret_value
+        return secret_value
 
-        if secret_value:
-            info(
-                f"[config] Using secret from Secure Enclave via amun-keychain-secrets: {env_name}"
-            )
-            os.environ[env_name] = secret_value
-            return secret_value
-
-        if secret_error:
-            info(f"[config] Secure Enclave lookup failed for {env_name}: {secret_error}")
+    if secret_error:
+        info(f"[config] Secure Enclave lookup failed for {env_name}: {secret_error}")
 
     fail(f"CapRover password env var is required but not set: {env_name}")
 
@@ -1843,27 +1840,26 @@ def expand_env_var_template(value, environment, context, app_name=None):
             return str(app_name)
 
         if env_name not in environment:
-            if amun_secret_exists(env_name):
+            info(
+                f"[config] Environment variable {env_name} referenced by env var template in "
+                + context
+                + f" is not set; reading secret '{env_name}' from Secure Enclave "
+                + "via amun-keychain-secrets (Touch ID/passcode prompt required)..."
+            )
+            secret_value, secret_error = fetch_amun_secret(env_name)
+
+            if secret_value is not None:
                 info(
-                    f"[config] Environment variable {env_name} referenced by env var template in "
-                    + context
-                    + f" is not set; reading secret '{env_name}' from Secure Enclave "
-                    + "via amun-keychain-secrets (Touch ID/passcode prompt required)..."
+                    f"[config] Using secret from Secure Enclave via amun-keychain-secrets: {env_name}"
                 )
-                secret_value, secret_error = fetch_amun_secret(env_name)
+                try:
+                    environment[env_name] = secret_value
+                except (TypeError, AttributeError):
+                    pass
+                return str(secret_value)
 
-                if secret_value is not None:
-                    info(
-                        f"[config] Using secret from Secure Enclave via amun-keychain-secrets: {env_name}"
-                    )
-                    try:
-                        environment[env_name] = secret_value
-                    except (TypeError, AttributeError):
-                        pass
-                    return str(secret_value)
-
-                if secret_error:
-                    info(f"[config] Secure Enclave lookup failed for {env_name}: {secret_error}")
+            if secret_error:
+                info(f"[config] Secure Enclave lookup failed for {env_name}: {secret_error}")
 
             fail(
                 "environment variable "
