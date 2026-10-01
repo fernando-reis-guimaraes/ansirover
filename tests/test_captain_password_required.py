@@ -31,14 +31,18 @@ class CaptainPasswordRequiredTests(unittest.TestCase):
             with self.subTest(cli=cli_name):
                 module = load_module(cli_name)
 
-                with mock.patch.dict(os.environ, {}, clear=True):
+                with mock.patch.dict(
+                    os.environ, {"ANSIROVER_DISABLE_AMUN": "1"}, clear=True
+                ):
                     with self.assertRaises(SystemExit):
                         module.require_captain_password("srv1")
 
     def test_download_backup_api_requires_password(self):
         module = load_module("ansirover-download-backup")
 
-        with mock.patch.dict(os.environ, {}, clear=True), mock.patch.object(
+        with mock.patch.dict(
+            os.environ, {"ANSIROVER_DISABLE_AMUN": "1"}, clear=True
+        ), mock.patch.object(
             module.subprocess,
             "run",
         ) as run:
@@ -50,7 +54,9 @@ class CaptainPasswordRequiredTests(unittest.TestCase):
     def test_delete_app_safely_api_requires_password(self):
         module = load_module("ansirover-delete-app-safely")
 
-        with mock.patch.dict(os.environ, {}, clear=True), mock.patch.object(
+        with mock.patch.dict(
+            os.environ, {"ANSIROVER_DISABLE_AMUN": "1"}, clear=True
+        ), mock.patch.object(
             module.subprocess,
             "run",
         ) as run:
@@ -68,7 +74,9 @@ class CaptainPasswordRequiredTests(unittest.TestCase):
     def test_health_check_api_requires_password(self):
         module = load_module("ansirover-health-check")
 
-        with mock.patch.dict(os.environ, {}, clear=True), mock.patch.object(
+        with mock.patch.dict(
+            os.environ, {"ANSIROVER_DISABLE_AMUN": "1"}, clear=True
+        ), mock.patch.object(
             module.subprocess,
             "run",
         ) as run:
@@ -80,7 +88,9 @@ class CaptainPasswordRequiredTests(unittest.TestCase):
     def test_delete_without_backup_requires_password(self):
         module = load_module("ansirover-delete-app-without-local-backup")
 
-        with mock.patch.dict(os.environ, {}, clear=True), mock.patch.object(
+        with mock.patch.dict(
+            os.environ, {"ANSIROVER_DISABLE_AMUN": "1"}, clear=True
+        ), mock.patch.object(
             module.subprocess,
             "run",
         ) as run:

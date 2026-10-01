@@ -36,6 +36,8 @@ When the value starts with `http://` or `https://`, the script uses `caprover ap
 CAPROVER_PASSWORD
 ```
 
+When a required password variable (`CAPROVER_PASSWORD` or `<SERVER>_CAPTAIN_PASSWORD`) is missing but a same-named secret exists in `amun-keychain-secrets`, the script reads it from the Secure Enclave after warning which secret it will read and that a Touch ID/passcode prompt is required. Set `ANSIROVER_DISABLE_AMUN=1` to disable this fallback.
+
 URL mode does not read `~/.config/configstore/caprover.json`, does not perform the SSH `docker pull` image preflight, and does not support `--with-image` or `--with-volumes`.
 
 Examples:
@@ -203,6 +205,8 @@ DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@db/app
 ```
 
 Only the `${VAR}` form is expanded. The referenced name must already exist in the process environment. A present variable with an empty value is valid. Variables defined by other lines in the sidecar are not expansion sources, and substituted values are not recursively expanded.
+
+When a referenced variable is missing from the process environment but a same-named secret exists in `amun-keychain-secrets`, the script reads it from the Secure Enclave after warning which secret it will read and that a Touch ID/passcode prompt is required. Fetched values are reused within the process so each secret prompts at most once. Set `ANSIROVER_DISABLE_AMUN=1` to disable this fallback.
 
 Two reserved built-in templates are available without process environment variables:
 

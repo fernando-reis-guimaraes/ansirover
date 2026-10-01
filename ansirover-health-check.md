@@ -112,3 +112,4 @@ An unavailable mapping, a cancelled prompt, a bad password, or a non-APR1 hash f
 - `curl` must be available locally.
 - `openssl` must be available locally when an APR1 password must be prompted for and verified.
 - `<SERVER>_CAPTAIN_PASSWORD` is required; the command fails before any work when it is not set.
+- When the password variable is missing but a same-named secret exists in `amun-keychain-secrets`, the command reads it from the Secure Enclave after warning which secret it will read and that a Touch ID/passcode prompt is required. Set `ANSIROVER_DISABLE_AMUN=1` to disable this fallback.

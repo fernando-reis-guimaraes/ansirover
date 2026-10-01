@@ -65,6 +65,10 @@ class SwarmStabilityTests(unittest.TestCase):
             return_value=False,
         ), mock.patch.object(
             self.module,
+            "resolve_service_name",
+            return_value="srv-captain--example",
+        ), mock.patch.object(
+            self.module,
             "get_service_replica_counts",
             return_value=(1, 1),
         ), mock.patch.object(
@@ -104,6 +108,10 @@ class SwarmStabilityTests(unittest.TestCase):
             self.module,
             "is_caprover_url",
             return_value=False,
+        ), mock.patch.object(
+            self.module,
+            "resolve_service_name",
+            return_value="srv-captain--example",
         ), mock.patch.object(
             self.module,
             "get_service_replica_counts",

@@ -177,18 +177,20 @@ class EnvVarTemplateExpansionTests(unittest.TestCase):
         self.assertEqual(templates, {"VALUE": "${FIRST}"})
 
     def test_sidecar_variables_are_not_expansion_sources(self):
-        with self.assertRaises(SystemExit):
-            self.parse(
-                "FIRST=local-value\nSECOND=${FIRST}\n",
-                {},
-            )
+        with mock.patch.dict(os.environ, {"ANSIROVER_DISABLE_AMUN": "1"}, clear=True):
+            with self.assertRaises(SystemExit):
+                self.parse(
+                    "FIRST=local-value\nSECOND=${FIRST}\n",
+                    {},
+                )
 
     def test_missing_environment_variable_fails(self):
-        with self.assertRaises(SystemExit):
-            self.parse(
-                "VALUE=${MISSING}\n",
-                {},
-            )
+        with mock.patch.dict(os.environ, {"ANSIROVER_DISABLE_AMUN": "1"}, clear=True):
+            with self.assertRaises(SystemExit):
+                self.parse(
+                    "VALUE=${MISSING}\n",
+                    {},
+                )
 
     def test_present_empty_environment_variable_is_valid(self):
         env_vars, templates = self.parse(
@@ -297,7 +299,9 @@ class EnvVarTemplateExpansionTests(unittest.TestCase):
                 wait_deploy=True,
             )
 
-            with mock.patch.dict(os.environ, {}, clear=True), mock.patch.object(
+            with mock.patch.dict(
+                os.environ, {"ANSIROVER_DISABLE_AMUN": "1"}, clear=True
+            ), mock.patch.object(
                 self.module,
                 "restore_one_app_steps",
             ) as restore_steps:

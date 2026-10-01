@@ -5,7 +5,10 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import os
 import re
+import shutil
+import subprocess
 from collections.abc import Mapping
 
 
@@ -328,3 +331,121 @@ def merge_description(
         return human_description.rstrip() + "\n\n" + metadata_block
 
     return metadata_block
+
+
+AMUN_COMMAND = "amun-keychain-secrets"
+AMUN_LIST_TIMEOUT_SECONDS = 10
+AMUN_GET_TIMEOUT_SECONDS = 120
+AMUN_DISABLE_ENV_NAME = "ANSIROVER_DISABLE_AMUN"
+_AMUN_SECRET_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_AMUN_SECRET_NAMES_CACHE: dict[str, object] = {"loaded": False, "names": None}
+_AMUN_FETCHED_SECRETS_CACHE: dict[str, str] = {}
+
+
+def clear_amun_cache() -> None:
+    _AMUN_SECRET_NAMES_CACHE["loaded"] = False
+    _AMUN_SECRET_NAMES_CACHE["names"] = None
+    _AMUN_FETCHED_SECRETS_CACHE.clear()
+
+
+def is_valid_amun_secret_name(name: object) -> bool:
+    return bool(_AMUN_SECRET_NAME_PATTERN.fullmatch(str(name)))
+
+
+def is_amun_lookup_disabled() -> bool:
+    return str(os.environ.get(AMUN_DISABLE_ENV_NAME, "")).strip() == "1"
+
+
+def list_amun_secret_names(timeout_seconds: float = AMUN_LIST_TIMEOUT_SECONDS) -> set[str] | None:
+    if is_amun_lookup_disabled():
+        return None
+
+    if shutil.which(AMUN_COMMAND) is None:
+        return None
+
+    try:
+        completed = subprocess.run(
+            [AMUN_COMMAND, "list"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=timeout_seconds,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+    if completed.returncode != 0:
+        return None
+
+    return {
+        line.strip()
+        for line in str(completed.stdout or "").splitlines()
+        if line.strip()
+    }
+
+
+def cached_amun_secret_names() -> set[str] | None:
+    if _AMUN_SECRET_NAMES_CACHE.get("loaded"):
+        cached = _AMUN_SECRET_NAMES_CACHE.get("names")
+        return set(cached) if isinstance(cached, set) else None
+
+    names = list_amun_secret_names()
+    _AMUN_SECRET_NAMES_CACHE["loaded"] = True
+    _AMUN_SECRET_NAMES_CACHE["names"] = set(names) if names is not None else None
+    return names
+
+
+def amun_secret_exists(secret_name: object) -> bool:
+    if not is_valid_amun_secret_name(secret_name):
+        return False
+
+    names = cached_amun_secret_names()
+
+    if names is None:
+        return False
+
+    return str(secret_name) in names
+
+
+def fetch_amun_secret(
+    secret_name: object,
+    timeout_seconds: float = AMUN_GET_TIMEOUT_SECONDS,
+) -> tuple[str | None, str | None]:
+    name = str(secret_name)
+
+    if name in _AMUN_FETCHED_SECRETS_CACHE:
+        return _AMUN_FETCHED_SECRETS_CACHE[name], None
+
+    if is_amun_lookup_disabled():
+        return None, AMUN_DISABLE_ENV_NAME + " is set"
+
+    if not is_valid_amun_secret_name(name):
+        return None, "invalid amun secret name: " + name
+
+    if shutil.which(AMUN_COMMAND) is None:
+        return None, AMUN_COMMAND + " executable not found in PATH"
+
+    try:
+        completed = subprocess.run(
+            [AMUN_COMMAND, "get", name],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired:
+        return None, "amun secret lookup timed out for: " + name
+    except (OSError, subprocess.SubprocessError) as error:
+        return None, "amun secret lookup failed for " + name + ": " + str(error)
+
+    if completed.returncode != 0:
+        detail = str(completed.stderr or "").strip() or str(completed.stdout or "").strip()
+        if not detail:
+            detail = "amun secret lookup failed for: " + name
+        return None, detail
+
+    value = str(completed.stdout or "")
+    _AMUN_FETCHED_SECRETS_CACHE[name] = value
+    return value, None

@@ -13,6 +13,8 @@ from pathlib import Path
 from datetime import datetime
 from urllib.parse import urlparse
 
+from caprover_ansirover_policy import amun_secret_exists, fetch_amun_secret
+
 
 DELETE_APP_API_PATH = "/user/apps/appDefinitions/delete"
 APP_DEFINITIONS_API_PATH = "/user/apps/appDefinitions"
@@ -45,10 +47,28 @@ def require_captain_password(server_name):
     env_name = get_captain_password_env_name(server_name)
     password = os.environ.get(env_name, "")
 
-    if not password:
-        fail(f"CapRover password env var is required but not set: {env_name}")
+    if password:
+        return password
 
-    return password
+    if amun_secret_exists(env_name):
+        info(
+            f"[config] Environment variable {env_name} is not set; "
+            f"reading secret '{env_name}' from Secure Enclave "
+            "via amun-keychain-secrets (Touch ID/passcode prompt required)..."
+        )
+        secret_value, secret_error = fetch_amun_secret(env_name)
+
+        if secret_value:
+            info(
+                f"[config] Using secret from Secure Enclave via amun-keychain-secrets: {env_name}"
+            )
+            os.environ[env_name] = secret_value
+            return secret_value
+
+        if secret_error:
+            info(f"[config] Secure Enclave lookup failed for {env_name}: {secret_error}")
+
+    fail(f"CapRover password env var is required but not set: {env_name}")
 
 
 def validate_simple_name(label, value):

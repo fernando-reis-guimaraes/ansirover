@@ -155,7 +155,7 @@ class CliAndApiTests(unittest.TestCase):
 
     @mock.patch("subprocess.run")
     def test_url_api_requires_caprover_password(self, run):
-        with mock.patch.dict(os.environ, {}, clear=True):
+        with mock.patch.dict(os.environ, {"ANSIROVER_DISABLE_AMUN": "1"}, clear=True):
             with self.assertRaises(SystemExit):
                 self.module.run_caprover_api(
                     "https://captain.example.test",
@@ -168,7 +168,7 @@ class CliAndApiTests(unittest.TestCase):
 
     @mock.patch("subprocess.run")
     def test_name_api_requires_captain_password(self, run):
-        with mock.patch.dict(os.environ, {}, clear=True):
+        with mock.patch.dict(os.environ, {"ANSIROVER_DISABLE_AMUN": "1"}, clear=True):
             with self.assertRaises(SystemExit):
                 self.module.run_caprover_api(
                     "storage",
@@ -180,7 +180,7 @@ class CliAndApiTests(unittest.TestCase):
         run.assert_not_called()
 
     def test_require_captain_password_fails_fast_for_machine_name(self):
-        with mock.patch.dict(os.environ, {}, clear=True):
+        with mock.patch.dict(os.environ, {"ANSIROVER_DISABLE_AMUN": "1"}, clear=True):
             with self.assertRaises(SystemExit):
                 self.module.require_captain_password("srv1")
 
@@ -191,7 +191,9 @@ class CliAndApiTests(unittest.TestCase):
             path="/tmp/example",
         )
 
-        with mock.patch.dict(os.environ, {}, clear=True), mock.patch.object(
+        with mock.patch.dict(
+            os.environ, {"ANSIROVER_DISABLE_AMUN": "1"}, clear=True
+        ), mock.patch.object(
             self.module,
             "load_ansirover_app",
         ) as load_app, mock.patch.object(
@@ -911,6 +913,10 @@ class PostDeployTests(unittest.TestCase):
             self.module,
             "is_caprover_url",
             return_value=False,
+        ), mock.patch.object(
+            self.module,
+            "resolve_service_name",
+            return_value="srv-captain--example",
         ), mock.patch.object(
             self.module,
             "get_service_replica_counts",
