@@ -528,20 +528,36 @@ def print_bind_mount_warnings(bind_mounts):
             info(f"[warn] bind mount: {host_path}")
 
 
+def get_physical_volume_name_candidates(volume_name):
+    # New CapRover uses bare Docker volume names (e.g. adguard-work).
+    # Old CapRover uses captain-- prefix (e.g. captain--adguard-work).
+    # Prefer new (bare) first, accept old (prefixed) for pre-migration servers.
+    bare = str(volume_name)
+    prefixed = "captain--" + str(volume_name)
+
+    if bare == prefixed:
+        return [bare]
+
+    return [bare, prefixed]
+
+
 def confirm_volume_deletion(volume_names):
     for volume_name in volume_names:
-        physical_volume_name = "captain--" + volume_name
+        bare_volume, *fallback_volumes = get_physical_volume_name_candidates(volume_name)
+        fallback_volume = fallback_volumes[0] if fallback_volumes else bare_volume
 
         print("", file=sys.stderr)
-        print("Volume to delete:", file=sys.stderr)
-        print("  " + physical_volume_name, file=sys.stderr)
+        print("Volume to delete (new bare name preferred):", file=sys.stderr)
+        print("  " + bare_volume, file=sys.stderr)
+        print("Old prefixed name also accepted for pre-migration servers:", file=sys.stderr)
+        print("  " + fallback_volume, file=sys.stderr)
         print("", file=sys.stderr)
-        typed_value = input("Type exactly this volume name to delete it: ").strip()
+        typed_value = input("Type exactly the new bare volume name (or old prefixed name) to delete it: ").strip()
 
-        if typed_value != physical_volume_name:
+        if typed_value not in (bare_volume, fallback_volume):
             fail(
                 "volume deletion confirmation did not match. "
-                f"Expected {physical_volume_name!r}, got {typed_value!r}"
+                f"Expected {bare_volume!r} (or {fallback_volume!r} for old servers), got {typed_value!r}"
             )
 
 

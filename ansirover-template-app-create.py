@@ -266,11 +266,12 @@ def render_service_override(app_name):
     return f"""# DELETE THIS FILE IF THE APP DOES NOT NEED DOCKER SERVICE OVERRIDES.
 # AnsiRover service update override sidecar for {app_name}.
 # Keep this as a Docker Compose service fragment compatible with CapRover.
+# New CapRover uses the bare service name below; old CapRover used srv-captain--{app_name}.
 
 version: "3.7"
 
 services:
-  srv-captain--{app_name}:
+  {app_name}:
     environment:
       EXAMPLE_FROM_SERVICE_OVERRIDE: "change-me"
 """
