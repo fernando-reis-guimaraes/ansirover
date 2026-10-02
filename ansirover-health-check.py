@@ -678,11 +678,30 @@ def run_remote_bash(ssh_target, script, timeout_seconds):
     return completed_process.stdout, "", 0
 
 
+def get_service_name_candidates(app_name):
+    # New CapRover uses the bare service name (e.g. adguard).
+    # Old CapRover uses the srv-captain-- prefix (e.g. srv-captain--adguard).
+    # Prefer new (bare) first, fall back to old (prefixed).
+    bare = str(app_name)
+    prefixed = f"srv-captain--{app_name}"
+
+    if bare == prefixed:
+        return [bare]
+
+    return [bare, prefixed]
+
+
 def inspect_containers(ssh_target, app_name, timeout_seconds):
-    service_name = f"srv-captain--{app_name}"
+    bare_service, *fallback_services = get_service_name_candidates(app_name)
+    fallback_service = fallback_services[0] if fallback_services else bare_service
+    # Single SSH roundtrip: prefer the new bare service name, fall back to
+    # the old srv-captain-- prefixed name when resolving containers.
     script = (
-        "docker ps -a "
-        f"--filter {shlex.quote('name=' + service_name)} "
+        f"BARE={shlex.quote(bare_service)}; "
+        f"PREFIXED={shlex.quote(fallback_service)}; "
+        'SVC="$BARE"; '
+        'docker service inspect "$SVC" >/dev/null 2>&1 || SVC="$PREFIXED"; '
+        'docker ps -a --filter "name=$SVC" '
         "--format '{{.ID}}' "
         "| while IFS= read -r container_id; do "
         "[ -n \"$container_id\" ] || continue; "

@@ -21,22 +21,28 @@ class ServiceNameNormalizationTest(unittest.TestCase):
     def setUpClass(cls):
         cls.module = load_script_module()
 
-    def test_bare_app_name_gets_full_prefix(self):
+    def test_bare_app_name_stays_bare_for_new_caprover(self):
         self.assertEqual(
             self.module.normalize_service_name("example-app"),
-            "srv-captain--example-app",
+            "example-app",
         )
 
-    def test_already_prefixed_app_name_is_kept(self):
+    def test_already_prefixed_app_name_is_stripped_to_bare(self):
         self.assertEqual(
             self.module.normalize_service_name("srv-captain--example-app"),
-            "srv-captain--example-app",
+            "example-app",
         )
 
-    def test_captain_prefix_app_name_becomes_service_name(self):
+    def test_captain_prefix_app_name_is_stripped_to_bare(self):
         self.assertEqual(
             self.module.normalize_service_name("captain--example-app"),
-            "srv-captain--example-app",
+            "example-app",
+        )
+
+    def test_service_name_candidates_prefer_bare_then_prefixed(self):
+        self.assertEqual(
+            self.module.get_service_name_candidates("example-app"),
+            ["example-app", "srv-captain--example-app"],
         )
 
 
@@ -128,13 +134,16 @@ class RemoteScriptTest(unittest.TestCase):
         cls.module = load_script_module()
 
     def test_tail_count_without_follow(self):
-        script = self.module.build_remote_script("srv-captain--example-app", False)
+        script = self.module.build_remote_script("example-app", False)
         self.assertIn("follow=no", script)
         self.assertIn("docker service logs --tail 200 --timestamps", script)
         self.assertIn('if [ "$follow" = "yes" ]; then', script)
+        # Dual support: bare first, prefixed fallback.
+        self.assertIn('fallback_service_name=', script)
+        self.assertIn('srv-captain--example-app', script)
 
     def test_tail_count_with_follow(self):
-        script = self.module.build_remote_script("srv-captain--example-app", True)
+        script = self.module.build_remote_script("example-app", True)
         self.assertIn("follow=yes", script)
         self.assertIn("exec docker service logs --tail 100 --timestamps -f", script)
 

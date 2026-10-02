@@ -128,33 +128,58 @@ def resolve_ssh_target(machine_name):
 
 
 def normalize_service_name(app_name):
-    if app_name.startswith("srv-captain--"):
-        return app_name
+    # New CapRover uses the bare service name (e.g. adguard).
+    # Normalize any old prefixed input down to the bare name; the remote
+    # script tries the bare name first and falls back to srv-captain--.
+    bare = str(app_name)
 
-    if app_name.startswith("captain--"):
-        return "srv-" + app_name
+    if bare.startswith("srv-captain--"):
+        bare = bare[len("srv-captain--"):]
 
-    return "srv-captain--" + app_name
+    elif bare.startswith("captain--"):
+        bare = bare[len("captain--"):]
+
+    if not bare:
+        fail(f"app name resolves to empty bare service name: {app_name!r}")
+
+    return bare
+
+
+def get_service_name_candidates(app_name):
+    bare = normalize_service_name(app_name)
+    prefixed = f"srv-captain--{bare}"
+
+    if bare == prefixed:
+        return [bare]
+
+    return [bare, prefixed]
 
 
 def build_remote_script(service_name, follow):
     follow_value = "yes" if follow else "no"
     docker_name_format = "{{.Name}}"
+    fallback_service_name = f"srv-captain--{service_name}" if not service_name.startswith("srv-captain--") else service_name
 
     return f"""set -euo pipefail
 
 service_name={shlex.quote(service_name)}
+fallback_service_name={shlex.quote(fallback_service_name)}
 follow={shlex.quote(follow_value)}
 
 echo "== checking docker =="
 command -v docker >/dev/null
 
-echo "== checking service =="
-if ! docker service inspect "$service_name" >/dev/null 2>&1; then
-  echo "ERROR: service not found: $service_name" >&2
+echo "== checking service (new bare first, old prefixed fallback) =="
+if docker service inspect "$service_name" >/dev/null 2>&1; then
+  echo "OK: service found (new): $service_name"
+elif docker service inspect "$fallback_service_name" >/dev/null 2>&1; then
+  echo "OK: service found (old fallback): $fallback_service_name (requested: $service_name)"
+  service_name="$fallback_service_name"
+else
+  echo "ERROR: service not found: $service_name (fallback also missing: $fallback_service_name)" >&2
   echo >&2
-  echo "== available CapRover-like services ==" >&2
-  docker service ls --format '{docker_name_format}' | grep -E '^srv-captain--' >&2 || true
+  echo "== available services ==" >&2
+  docker service ls --format '{docker_name_format}' >&2 || true
   exit 1
 fi
 
@@ -222,7 +247,7 @@ def main():
     info("[plan] Machine: " + args.machine_name)
     info("[plan] SSH target: " + ssh_target)
     info("[plan] CapRover app: " + args.app_name)
-    info("[plan] Docker service: " + service_name)
+    info("[plan] Docker service (new bare, fallback old prefixed): " + service_name + " / srv-captain--" + service_name)
     info("[plan] Follow: " + ("yes" if args.follow else "no"))
 
     run_remote(ssh_target, build_remote_script(service_name, args.follow))

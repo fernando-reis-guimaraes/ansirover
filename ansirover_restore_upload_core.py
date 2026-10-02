@@ -1097,7 +1097,24 @@ def run_remote_command(server_name, remote_command):
 
 
 def get_service_name(app_name):
-    return "srv-captain--" + app_name
+    # New CapRover uses the bare service name (e.g. adguard).
+    return str(app_name)
+
+
+def get_legacy_service_name(app_name):
+    return "srv-captain--" + str(app_name)
+
+
+def _strip_service_prefix(app_name):
+    bare = str(app_name)
+
+    if bare.startswith("srv-captain--"):
+        bare = bare[len("srv-captain--"):]
+
+    elif bare.startswith("captain--"):
+        bare = bare[len("captain--"):]
+
+    return bare or str(app_name)
 
 
 _SERVICE_NAME_CACHE: dict[tuple[str, str], str] = {}
@@ -1110,29 +1127,31 @@ def resolve_service_name(server_name, app_name):
     if cached_service_name is not None:
         return cached_service_name
 
-    prefixed_service_name = get_service_name(app_name)
+    bare_service_name = _strip_service_prefix(app_name)
+    prefixed_service_name = get_legacy_service_name(bare_service_name)
 
     if is_caprover_url(server_name):
-        _SERVICE_NAME_CACHE[cache_key] = prefixed_service_name
-        return prefixed_service_name
+        _SERVICE_NAME_CACHE[cache_key] = bare_service_name
+        return bare_service_name
 
-    probe_process = run_remote_command(
-        server_name,
-        "docker service inspect "
-        + shlex.quote(prefixed_service_name)
-        + " --format '{{.ID}}'",
-    )
+    # Prefer the new bare service name; fall back to the old
+    # srv-captain-- prefixed name for pre-migration servers.
+    for candidate in (bare_service_name, prefixed_service_name):
+        probe_process = run_remote_command(
+            server_name,
+            "docker service inspect "
+            + shlex.quote(candidate)
+            + " --format '{{.ID}}'",
+        )
 
-    if probe_process.returncode == 0 and probe_process.stdout.strip():
-        _SERVICE_NAME_CACHE[cache_key] = prefixed_service_name
-        return prefixed_service_name
+        if probe_process.returncode == 0 and probe_process.stdout.strip():
+            _SERVICE_NAME_CACHE[cache_key] = candidate
+            return candidate
 
-    # Some CapRover apps (for example crud-pooler) own a bare service name
-    # without the srv-captain-- prefix. Fall back so post-deploy inspection
-    # targets the service CapRover actually manages.
-    resolved_service_name = str(app_name)
-    _SERVICE_NAME_CACHE[cache_key] = resolved_service_name
-    return resolved_service_name
+    # Neither service exists yet (e.g. scaled to zero during restore);
+    # default to the new bare name so callers create/inspect it first.
+    _SERVICE_NAME_CACHE[cache_key] = bare_service_name
+    return bare_service_name
 
 
 def get_task_state_snapshot(server_name, app_name):

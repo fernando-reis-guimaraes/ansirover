@@ -842,7 +842,7 @@ class PostDeployTests(unittest.TestCase):
 
         self.assertEqual(details, [])
 
-    def test_service_name_resolves_prefixed_service(self):
+    def test_service_name_prefers_bare_service(self):
         self.module._SERVICE_NAME_CACHE.clear()
 
         with mock.patch.object(
@@ -862,13 +862,46 @@ class PostDeployTests(unittest.TestCase):
             resolved = self.module.resolve_service_name("storage", "prefixed-app")
             cached = self.module.resolve_service_name("storage", "prefixed-app")
 
-        self.assertEqual(resolved, "srv-captain--prefixed-app")
-        self.assertEqual(cached, "srv-captain--prefixed-app")
+        self.assertEqual(resolved, "prefixed-app")
+        self.assertEqual(cached, "prefixed-app")
         self.assertEqual(run_remote_command.call_count, 1)
         probe_command = run_remote_command.call_args_list[0].args[1]
-        self.assertIn("srv-captain--prefixed-app", probe_command)
+        self.assertIn("prefixed-app", probe_command)
 
-    def test_service_name_falls_back_to_bare_name(self):
+    def test_service_name_falls_back_to_prefixed_name(self):
+        self.module._SERVICE_NAME_CACHE.clear()
+
+        def fake_run_remote_command(server_name, remote_command):
+            if "srv-captain--fallback-app" in remote_command:
+                return subprocess.CompletedProcess(
+                    args=[],
+                    returncode=0,
+                    stdout="def456\n",
+                    stderr="",
+                )
+
+            return subprocess.CompletedProcess(
+                args=[],
+                returncode=1,
+                stdout="",
+                stderr="Error: No such service: fallback-app",
+            )
+
+        with mock.patch.object(
+            self.module,
+            "is_caprover_url",
+            return_value=False,
+        ), mock.patch.object(
+            self.module,
+            "run_remote_command",
+            side_effect=fake_run_remote_command,
+        ) as run_remote_command:
+            resolved = self.module.resolve_service_name("storage", "fallback-app")
+
+        self.assertEqual(resolved, "srv-captain--fallback-app")
+        self.assertEqual(run_remote_command.call_count, 2)
+
+    def test_service_name_defaults_to_bare_when_neither_exists(self):
         self.module._SERVICE_NAME_CACHE.clear()
 
         with mock.patch.object(
@@ -882,7 +915,7 @@ class PostDeployTests(unittest.TestCase):
                 args=[],
                 returncode=1,
                 stdout="",
-                stderr='Error: No such service: srv-captain--bare-app',
+                stderr="Error: No such service",
             ),
         ):
             resolved = self.module.resolve_service_name("storage", "bare-app")
@@ -905,7 +938,7 @@ class PostDeployTests(unittest.TestCase):
                 "url-app",
             )
 
-        self.assertEqual(resolved, "srv-captain--url-app")
+        self.assertEqual(resolved, "url-app")
         run_remote_command.assert_not_called()
 
     def test_wait_for_swarm_convergence_fails_on_new_failed_task(self):
