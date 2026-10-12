@@ -235,6 +235,7 @@ class ComposeBootstrapTests(unittest.TestCase):
         )
         self.assertIn("volumeName: demo-data", text)
         self.assertIn("containerPath: /app/data", text)
+        self.assertIn("volumes:\n  - volumeName: demo-data", text)
         self.assertLess(text.index("ansirover:"), text.index("hasPersistentData:"))
         self.assertLess(text.index("customDomain:"), text.index("tags:"))
 
