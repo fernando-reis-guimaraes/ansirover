@@ -19,7 +19,7 @@ Options:
 --port=<port>          containerHttpPort (default: auto-detected, else 3000 for Node or 80)
 --context=<path>       build context relative to application root (default: .)
 --dockerfile=<path>    Dockerfile relative to application root (default: auto-detected)
---minimal              create minimal YAML + compose (default)
+--minimal              create minimal YAML + compose + .envrc (default)
 --with-examples        also create example env-vars/nginx/pre-deploy/override sidecars
 --force                overwrite existing generated files
 --dry-run              print detection plan without writing files
@@ -78,8 +78,19 @@ Default minimal output:
 ```text
 ansirover/
 ├── compose.yaml       canonical one-service build/publication definition
-└── <app>.yaml         CapRover runtime inventory with detected port/image/volumes
+├── <app>.yaml         CapRover runtime inventory with detected port/image/volumes
+└── .envrc             local direnv file exporting IMAGE_TAG (see below)
 ```
+
+## `.envrc` and `IMAGE_TAG`
+
+The generated `.envrc` mirrors the `IMAGE_TAG` rule of `ansirover-compose-build-push` for local commands (`docker compose config`, `docker compose build`):
+
+```bash
+export IMAGE_TAG="$(git -C "$PWD/.." rev-parse --short HEAD 2>/dev/null || echo beta)"
+```
+
+It assumes the standard layout (environment directory directly under the application root) and falls back to `beta` outside a Git checkout. It requires [direnv](https://direnv.net); run `direnv allow` in the AnsiRover directory. A repository may additionally keep a root `.envrc` for project-wide vars (for example `REPO_ROOT`/`COMPOSE_FILE`); direnv loads both, parent first. The AnsiRover `.envrc` stays local-only: `ansirover-compose-build-push` never commits unknown environment files (allowlist).
 
 The inventory follows the canonical field order (`appName`, `deployedImageName`, `description`, `ansirover`, `hasPersistentData`, `instanceCount`, `containerHttpPort`, `notExposeAsWebApp`, `websocketSupport`, `customDomain`, `tags`, `httpAuth`, `volumes`, `ports`). It includes an explicit `ansirover:` policy block, an empty `customDomain: []` with a commented `publicDomain` example, and pre-filled `volumes:` from the root compose buildable service. Bootstrap never creates `README.md` or `DEPLOY.md`; deployment rationale lives with the user.
 

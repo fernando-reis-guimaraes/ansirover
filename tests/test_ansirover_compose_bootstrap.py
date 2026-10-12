@@ -167,6 +167,7 @@ class ComposeBootstrapTests(unittest.TestCase):
             ansirover = app / "ansirover"
             self.assertTrue((ansirover / "compose.yaml").is_file())
             self.assertTrue((ansirover / "crosspaste.yaml").is_file())
+            self.assertTrue((ansirover / ".envrc").is_file())
             self.assertFalse((ansirover / "README.md").exists())
             self.assertFalse((ansirover / "DEPLOY.md").exists())
             inventory = (ansirover / "crosspaste.yaml").read_text(encoding="utf-8")
@@ -257,6 +258,29 @@ class ComposeBootstrapTests(unittest.TestCase):
             self.assertTrue((ansirover / "demo.custom-nginx-config.conf").is_file())
             self.assertTrue((ansirover / "demo.pre-deploy-function.js").is_file())
             self.assertTrue((ansirover / "demo.service-update-override.yaml").is_file())
+        finally:
+            directory.cleanup()
+
+    def test_envrc_exports_image_tag_from_source_head(self):
+        directory, app = make_app({"package.json": '{"name": "demo"}'})
+        try:
+            git(app, "add", ".")
+            git(app, "commit", "-qm", "initial")
+            expected = git(app, "rev-parse", "--short", "HEAD").strip()
+            MODULE.main([str(app)])
+            envrc = app / "ansirover" / ".envrc"
+            content = envrc.read_text(encoding="utf-8")
+            self.assertIn("export IMAGE_TAG=", content)
+            self.assertIn("rev-parse --short HEAD", content)
+            # Functional check: sourcing the file must yield the source HEAD.
+            output = subprocess.run(
+                ["bash", "-c", "cd \"$1\" && set -a && . ./.envrc && set +a && printf '%s' \"$IMAGE_TAG\"", "_", str(app / "ansirover")],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            ).stdout
+            self.assertEqual(output, expected)
         finally:
             directory.cleanup()
 
