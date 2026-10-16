@@ -11,9 +11,9 @@ ansirover-logs-print <machine-name> <app-name> [-f]
 ## Examples
 
 ```bash
-ansirover-logs-print server-a example-app
-ansirover-logs-print server-a example-app -f
-ansirover-logs-print server-a example-app --follow
+ansirover-logs-print srv1 example-app
+ansirover-logs-print srv1 example-app -f
+ansirover-logs-print srv1 example-app --follow
 ```
 
 ## Machine name resolution
@@ -27,7 +27,7 @@ The `<machine-name>` is looked up in the CapRover CLI config at:
 The matching machine's `baseUrl` provides the SSH host, and a leading `captain.` subdomain is stripped. The SSH user is always `root`.
 
 ```text
-server-a -> https://captain.server-a.example.com -> root@server-a.example.com
+srv1 -> https://captain.srv1.example.com -> root@srv1.example.com
 ```
 
 ## App normalization

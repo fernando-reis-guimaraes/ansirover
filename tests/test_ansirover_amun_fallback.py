@@ -35,7 +35,7 @@ class AmunPolicyHelperTests(unittest.TestCase):
         return mock.patch.dict(os.environ, {"ANSIROVER_DISABLE_AMUN": ""}, clear=False)
 
     def test_valid_secret_names(self):
-        self.assertTrue(policy.is_valid_amun_secret_name("SERVER_A_CAPTAIN_PASSWORD"))
+        self.assertTrue(policy.is_valid_amun_secret_name("SRV1_CAPTAIN_PASSWORD"))
         self.assertTrue(policy.is_valid_amun_secret_name("DB_PASS_VAR"))
         self.assertTrue(policy.is_valid_amun_secret_name("a"))
         self.assertFalse(policy.is_valid_amun_secret_name("_LEADING_UNDERSCORE"))
@@ -117,13 +117,13 @@ class CaptainPasswordAmunFallbackTests(unittest.TestCase):
     def test_env_var_still_wins_over_amun(self):
         with mock.patch.dict(
             os.environ,
-            {"SERVER_A_CAPTAIN_PASSWORD": "from-env", "ANSIROVER_DISABLE_AMUN": ""},
+            {"SRV1_CAPTAIN_PASSWORD": "from-env", "ANSIROVER_DISABLE_AMUN": ""},
             clear=True,
         ):
             with mock.patch.object(
                 self.module, "fetch_amun_secret", side_effect=AssertionError("must not check amun")
             ):
-                self.assertEqual(self.module.require_captain_password("server-a"), "from-env")
+                self.assertEqual(self.module.require_captain_password("srv1"), "from-env")
 
     def test_missing_password_falls_back_to_amun_with_warning(self):
         with mock.patch.dict(os.environ, {}, clear=True):
@@ -132,12 +132,12 @@ class CaptainPasswordAmunFallbackTests(unittest.TestCase):
             ):
                 stderr = io.StringIO()
                 with redirect_stderr(stderr):
-                    value = self.module.require_captain_password("server-a")
+                    value = self.module.require_captain_password("srv1")
                 self.assertEqual(value, "amun-secret")
                 # The fetched secret is cached into the process environment.
-                self.assertEqual(os.environ.get("SERVER_A_CAPTAIN_PASSWORD"), "amun-secret")
+                self.assertEqual(os.environ.get("SRV1_CAPTAIN_PASSWORD"), "amun-secret")
                 output = stderr.getvalue()
-                self.assertIn("SERVER_A_CAPTAIN_PASSWORD", output)
+                self.assertIn("SRV1_CAPTAIN_PASSWORD", output)
                 self.assertIn("Secure Enclave", output)
                 self.assertIn("Touch ID", output)
                 self.assertNotIn("amun-secret", output)
@@ -145,7 +145,7 @@ class CaptainPasswordAmunFallbackTests(unittest.TestCase):
     def test_missing_password_still_fails_when_amun_has_no_secret(self):
         with mock.patch.dict(os.environ, {"ANSIROVER_DISABLE_AMUN": "1"}, clear=True):
             with self.assertRaises(SystemExit):
-                self.module.require_captain_password("server-a")
+                self.module.require_captain_password("srv1")
 
     def test_url_mode_falls_back_to_amun(self):
         with mock.patch.dict(os.environ, {}, clear=True):

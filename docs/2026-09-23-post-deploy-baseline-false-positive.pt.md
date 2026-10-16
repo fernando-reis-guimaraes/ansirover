@@ -4,9 +4,9 @@
 > (`2026-09-23-post-deploy-baseline-false-positive.en.md`) é a canônica conforme o `AGENTS.md`.
 
 Data: 23/09/2026
-App: `myapp-a1b2c3d4e5f6a7b8c9d0e1f2a3b4` no CapRover `server-a`
+App: `myapp-a1b2c3d4e5f6a7b8c9d0e1f2a3b4` no CapRover `srv1`
 Imagem: `cr.umapps.net/umapps/quantallm:4f009bc2`
-Comando: `ansirover-restore-upload server-a myapp-a1b2c3d4e5f6a7b8c9d0e1f2a3b4` (alias `aru`)
+Comando: `ansirover-restore-upload srv1 myapp-a1b2c3d4e5f6a7b8c9d0e1f2a3b4` (alias `aru`)
 
 ## O que aconteceu
 
@@ -86,4 +86,4 @@ serviço nunca atinge as réplicas desejadas. O caminho de falha (`running < des
 
 - `python3 -m unittest discover -s tests` passa, incluindo regressão nova que afirma que o
   snapshot de baseline acontece depois dos steps do restore e da verificação, não antes.
-- Redeploy do `myapp-a1b2c3d4e5f6a7b8c9d0e1f2a3b4` no `server-a` com a ferramenta corrigida.
+- Redeploy do `myapp-a1b2c3d4e5f6a7b8c9d0e1f2a3b4` no `srv1` com a ferramenta corrigida.

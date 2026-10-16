@@ -53,28 +53,28 @@ class CaptainUrlHostResolutionTest(unittest.TestCase):
 
     def test_captain_subdomain_is_stripped(self):
         self.assertEqual(
-            self.module.hostname_from_captain_url("https://captain.server-a.example.com"),
-            "server-a.example.com",
+            self.module.hostname_from_captain_url("https://captain.srv1.example.com"),
+            "srv1.example.com",
         )
 
     def test_plain_host_is_kept(self):
         self.assertEqual(
-            self.module.hostname_from_captain_url("https://server-a.example.com"),
-            "server-a.example.com",
+            self.module.hostname_from_captain_url("https://srv1.example.com"),
+            "srv1.example.com",
         )
 
     def test_schemeless_url_is_tolerated(self):
         self.assertEqual(
-            self.module.hostname_from_captain_url("captain.server-a.example.com:3000"),
-            "server-a.example.com",
+            self.module.hostname_from_captain_url("captain.srv1.example.com:3000"),
+            "srv1.example.com",
         )
 
     def test_ssh_target_is_root(self):
         self.assertEqual(
             self.module.derive_ssh_target_from_captain_url(
-                "https://captain.server-a.example.com"
+                "https://captain.srv1.example.com"
             ),
-            "root@server-a.example.com",
+            "root@srv1.example.com",
         )
 
 
@@ -86,7 +86,7 @@ class CaproverConfigLookupTest(unittest.TestCase):
     def _config(self):
         return {
             "CapMachines": [
-                {"name": "server-a", "baseUrl": "https://captain.server-a.example.com"},
+                {"name": "srv1", "baseUrl": "https://captain.srv1.example.com"},
                 {"name": "server-b", "baseUrl": "https://captain.server-b.example.com"},
             ]
         }
@@ -103,9 +103,9 @@ class CaproverConfigLookupTest(unittest.TestCase):
         self.assertEqual(context.exception.code, 2)
 
     def test_empty_base_url_fails(self):
-        config = {"CapMachines": [{"name": "server-a", "baseUrl": ""}]}
+        config = {"CapMachines": [{"name": "srv1", "baseUrl": ""}]}
         with self.assertRaises(SystemExit) as context:
-            self.module.find_captain_url_by_machine(config, "server-a")
+            self.module.find_captain_url_by_machine(config, "srv1")
         self.assertEqual(context.exception.code, 2)
 
 
@@ -120,11 +120,11 @@ class CliArgumentsTest(unittest.TestCase):
         self.assertEqual(context.exception.code, 2)
 
     def test_follow_flag(self):
-        arguments = self.module.parse_args(["server-a", "example-app", "-f"])
+        arguments = self.module.parse_args(["srv1", "example-app", "-f"])
         self.assertTrue(arguments.follow)
 
     def test_no_follow_by_default(self):
-        arguments = self.module.parse_args(["server-a", "example-app"])
+        arguments = self.module.parse_args(["srv1", "example-app"])
         self.assertFalse(arguments.follow)
 
 

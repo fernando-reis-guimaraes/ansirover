@@ -1,9 +1,9 @@
 # Post-deploy false positive: Swarm baseline captured before the last service update
 
 Date: 2026-09-23
-App: `myapp-a1b2c3d4e5f6a7b8c9d0e1f2a3b4` on CapRover machine `server-a`
+App: `myapp-a1b2c3d4e5f6a7b8c9d0e1f2a3b4` on CapRover machine `srv1`
 Image: `cr.umapps.net/umapps/quantallm:4f009bc2`
-Command: `ansirover-restore-upload server-a myapp-a1b2c3d4e5f6a7b8c9d0e1f2a3b4` (alias `aru`)
+Command: `ansirover-restore-upload srv1 myapp-a1b2c3d4e5f6a7b8c9d0e1f2a3b4` (alias `aru`)
 
 ## What happened
 
@@ -82,4 +82,4 @@ new `Failed/Rejected`) must stay. What must change is only the anchor.
 
 - `python3 -m unittest discover -s tests` passes, including new regression coverage asserting
   the baseline snapshot happens after the restore steps and verification, not before.
-- Redeploy of `myapp-a1b2c3d4e5f6a7b8c9d0e1f2a3b4` on `server-a` with the fixed tool.
+- Redeploy of `myapp-a1b2c3d4e5f6a7b8c9d0e1f2a3b4` on `srv1` with the fixed tool.

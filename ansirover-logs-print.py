@@ -222,7 +222,7 @@ def parse_args(argv):
         )
     )
 
-    parser.add_argument("machine_name", help="CapRover CLI server/machine name, e.g. server-a; @ is not allowed")
+    parser.add_argument("machine_name", help="CapRover CLI server/machine name, e.g. srv1; @ is not allowed")
     parser.add_argument("app_name", help="CapRover app name")
     parser.add_argument(
         "-f",

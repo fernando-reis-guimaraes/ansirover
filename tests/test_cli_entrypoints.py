@@ -65,7 +65,7 @@ class CliEntrypointTests(unittest.TestCase):
                 output = self.home / str(with_json) / "example"
                 with mock.patch.dict(os.environ, self.environment):
                     module.download_one_app(
-                        "server-a", definition, output, with_json=with_json,
+                        "srv1", definition, output, with_json=with_json,
                         with_image=False, include_dockerhub=False,
                         with_volumes=False, force=False,
                         caprover_root_domain="example.com",
