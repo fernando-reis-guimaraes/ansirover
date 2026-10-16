@@ -35,7 +35,7 @@ class CaptainPasswordRequiredTests(unittest.TestCase):
                     os.environ, {"ANSIROVER_DISABLE_AMUN": "1"}, clear=True
                 ):
                     with self.assertRaises(SystemExit):
-                        module.require_captain_password("srv1")
+                        module.require_captain_password("server-a")
 
     def test_download_backup_api_requires_password(self):
         module = load_module("ansirover-download-backup")
@@ -47,7 +47,7 @@ class CaptainPasswordRequiredTests(unittest.TestCase):
             "run",
         ) as run:
             with self.assertRaises(SystemExit):
-                module.run_caprover_api("srv1", "/user/apps/appDefinitions", "GET", {})
+                module.run_caprover_api("server-a", "/user/apps/appDefinitions", "GET", {})
 
         run.assert_not_called()
 
@@ -62,7 +62,7 @@ class CaptainPasswordRequiredTests(unittest.TestCase):
         ) as run:
             with self.assertRaises(SystemExit):
                 module.run_caprover_api(
-                    "srv1",
+                    "server-a",
                     "/user/apps/appDefinitions",
                     "GET",
                     {},
@@ -81,7 +81,7 @@ class CaptainPasswordRequiredTests(unittest.TestCase):
             "run",
         ) as run:
             with self.assertRaises(SystemExit):
-                module.run_caprover_api("srv1", "/user/apps/appDefinitions", "GET", {})
+                module.run_caprover_api("server-a", "/user/apps/appDefinitions", "GET", {})
 
         run.assert_not_called()
 
@@ -95,7 +95,7 @@ class CaptainPasswordRequiredTests(unittest.TestCase):
             "run",
         ) as run:
             with self.assertRaises(SystemExit):
-                module.delete_app("srv1", "example")
+                module.delete_app("server-a", "example")
 
         run.assert_not_called()
 

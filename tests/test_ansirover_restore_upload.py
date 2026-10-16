@@ -182,11 +182,11 @@ class CliAndApiTests(unittest.TestCase):
     def test_require_captain_password_fails_fast_for_machine_name(self):
         with mock.patch.dict(os.environ, {"ANSIROVER_DISABLE_AMUN": "1"}, clear=True):
             with self.assertRaises(SystemExit):
-                self.module.require_captain_password("srv1")
+                self.module.require_captain_password("server-a")
 
     def test_restore_one_app_fails_before_any_work_without_password(self):
         args = mock.Mock(
-            server_name="srv1",
+            server_name="server-a",
             app_name="example",
             path="/tmp/example",
         )

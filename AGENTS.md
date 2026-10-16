@@ -91,8 +91,8 @@ Provider-managed services are prerequisites, not AnsiRover-owned infrastructure.
 
 These rules apply to `ansirover-*` commands. Do not impose this lookup behavior on lower-level `caprover-*` helpers, which may intentionally work with direct SSH/server targets.
 
-- A bare server value such as `srv1` is always a CapRover machine name. Resolve it from `~/.config/configstore/caprover.json`.
-- Never fall back from a missing CapRover machine name to DNS, mDNS, Tailscale, `/etc/hosts`, or another hostname lookup. If `srv1` is both a valid hostname and a configured CapRover machine, the CapRover machine interpretation wins.
+- A bare server value such as `server-a` is always a CapRover machine name. Resolve it from `~/.config/configstore/caprover.json`.
+- Never fall back from a missing CapRover machine name to DNS, mDNS, Tailscale, `/etc/hosts`, or another hostname lookup. If `server-a` is both a valid hostname and a configured CapRover machine, the CapRover machine interpretation wins.
 - An AnsiRover CapRover machine name must not contain `@`. Reserve `@` for explicit SSH targets even if the upstream CapRover CLI would accept `@` in a machine name.
 - Target grammar validation belongs in each implementation after argument parsing. It must validate the parsed machine/URL value, not a raw `argv` position, so options placed before positionals cannot bypass the rule.
 - A direct SSH target is valid only on commands/options that explicitly support one, such as `--ssh-target=user@host`.
@@ -103,13 +103,13 @@ These rules apply to `ansirover-*` commands. Do not impose this lookup behavior 
 Examples:
 
 ```text
-srv1
+server-a
   -> CapRover machine-name lookup
 
-root@srv1
+root@server-a
   -> explicit SSH target, only where an SSH-target option is supported
 
-https://captain.srv1.umapps.net
+https://captain.server-a.example.com
   -> explicit Captain URL, only where URL mode is supported
 ```
 

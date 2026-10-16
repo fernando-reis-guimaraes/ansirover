@@ -51,13 +51,13 @@ class AnsiRoverTargetGrammarTests(unittest.TestCase):
                 module = load_module(cli_name)
 
                 with self.assertRaises(SystemExit):
-                    module.validate_caprover_machine_name("root@srv1")
+                    module.validate_caprover_machine_name("root@server-a")
 
     def test_restore_target_rejects_at_and_preserves_url_mode(self):
         module = load_module("ansirover-restore-upload")
 
         with self.assertRaises(SystemExit):
-            module.validate_server_target("root@srv1")
+            module.validate_server_target("root@server-a")
 
         with self.assertRaises(SystemExit):
             module.validate_server_target("https://user@captain.example.com")
@@ -66,9 +66,9 @@ class AnsiRoverTargetGrammarTests(unittest.TestCase):
 
     def test_option_before_positionals_does_not_bypass_logs_validation(self):
         module = load_module("ansirover-logs-print")
-        args = module.parse_args(["--follow", "root@srv1", "example"])
+        args = module.parse_args(["--follow", "root@server-a", "example"])
 
-        self.assertEqual(args.machine_name, "root@srv1")
+        self.assertEqual(args.machine_name, "root@server-a")
 
         with self.assertRaises(SystemExit):
             module.validate_caprover_machine_name(args.machine_name)
@@ -82,7 +82,7 @@ class AnsiRoverTargetGrammarTests(unittest.TestCase):
             [
                 "ansirover-delete-app-without-local-backup",
                 "--force",
-                "root@srv1",
+                "root@server-a",
                 "example",
             ],
         ):
